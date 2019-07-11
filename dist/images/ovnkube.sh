@@ -38,6 +38,7 @@ fi
 # OVN_SVC_CIDR - the cluster-service-cidr - v3
 # OVN_KUBERNETES_NAMESPACE - k8s namespace - v3
 # K8S_NODE - hostname of the node - v3
+# POD_IP - The pod IP allocated by k8s
 #
 # OVN_DAEMONSET_VERSION - version match daemonset and image - v3
 # K8S_TOKEN - the apiserver token. Automatically detected when running in a pod - v3
@@ -113,6 +114,7 @@ net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
 
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
+pod_ip=${POD_IP:=""}
 
 # host on which ovnkube-db POD is running and this POD contains both
 # OVN NB and SB DB running in their own container
@@ -675,6 +677,45 @@ ovn-master () {
   exit 9
 }
 
+# v2 v3 - run ovnkube --ha master
+ovn-ha-master () {
+  trap 'kill $(jobs -p); exit 0' TERM
+  check_ovn_daemonset_version "2 3"
+  rm -f /var/run/openvswitch/ovnkube-master.pid
+
+  echo "=============== ovn-master (wait for ready_to_start_node) ========== MASTER ONLY"
+  wait_for_event ready_to_start_node
+  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
+
+  # wait for northd to start
+  wait_for_event pid_ready ovn-northd.pid
+  sleep 5
+
+  # wait for ovs-servers to start since ovn-master sets some fields in OVS DB
+  echo "=============== ovn-master - (wait for ovs)"
+  wait_for_event ovs_ready
+
+  echo "=============== ovn-master ========== MASTER ONLY"
+  /usr/bin/ovnkube \
+    --init-master ${ovn_pod_host} \
+    --cluster-subnet ${net_cidr} --k8s-service-cidr=${svc_cidr} \
+    --nodeport \
+    --manage-db-servers \
+    --ovnkube-pod-ip ${pod_ip} \
+    --loglevel=${ovnkube_loglevel} \
+    --pidfile /var/run/openvswitch/ovnkube-master.pid \
+    --logfile /var/log/ovn-kubernetes/ovnkube-master.log &
+  echo "=============== ovn-master ========== running"
+  wait_for_event pid_ready ovnkube-master.pid
+  sleep 1
+
+  tail --follow=name /var/log/ovn-kubernetes/ovnkube-master.log &
+  kube_tail_pid=$!
+
+  pid_health /var/run/openvswitch/ovnkube-master.pid ${kube_tail_pid}
+  exit 9
+}
+
 # ovn-controller - all nodes
 ovn-controller () {
   check_ovn_daemonset_version "3"
@@ -834,6 +875,11 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
     "ovn-master")      # pod ovnkube-master container ovnkube-master
 	ovn-master
     ;;
+
+    "ovn-ha-master")   # pod ovnkube-master container ovnkube-ha-master
+	ovn-ha-master
+    ;;
+
     "ovs-server")      # pod ovnkube-node container ovs-daemons
         ovs-server
     ;;
