@@ -124,7 +124,7 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	return wf, nil
 }
 
-// Shutdown removes all handlers
+// Shutdown closes the channel and removes all handlers
 func (wf *WatchFactory) Shutdown() {
 	close(wf.stopChan)
 	for _, inf := range wf.informers {
