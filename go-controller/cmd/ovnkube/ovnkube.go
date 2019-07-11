@@ -212,15 +212,16 @@ func runOvnKube(ctx *cli.Context) error {
 			if runtime.GOOS == "windows" {
 				panic("Windows is not supported as master node")
 			}
-			// run the master controller to init the master
-			ovnController := ovn.NewOvnController(clientset, factory)
-			err := ovnController.StartClusterMaster(master)
-			if err != nil {
-				logrus.Errorf(err.Error())
-				panic(err.Error())
+
+			// Check if the pod ip is set or not if manageDBServers is set
+			if config.ManageDBServers && config.Kubernetes.PodIP == "" {
+				panic("--manage-db-servers requires --pod-ip.")
 			}
-			// add watchers for relevant resources' events
-			if err := ovnController.Run(); err != nil {
+
+			// run the master controller to init the master
+			ovnHAController := ovn.NewHAMasterController(clientset, factory, master, config.ManageDBServers)
+			err := ovnHAController.StartHAMasterController()
+			if err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
 			}

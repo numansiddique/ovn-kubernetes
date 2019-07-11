@@ -28,6 +28,7 @@ const (
 	ovsAppctlCommand  = "ovs-appctl"
 	ovnNbctlCommand   = "ovn-nbctl"
 	ovnSbctlCommand   = "ovn-sbctl"
+	ovnAppctlCommand  = "ovn-appctl"
 	ipCommand         = "ip"
 	powershellCommand = "powershell"
 	netshCommand      = "netsh"
@@ -36,6 +37,11 @@ const (
 	rhel              = "RHEL"
 	ubuntu            = "Ubuntu"
 	windowsOS         = "windows"
+)
+
+const (
+	nbdbCtlSock = "ovnnb_db.ctl"
+	sbdbCtlSock = "ovnsb_db.ctl"
 )
 
 func runningPlatform() (string, error) {
@@ -81,8 +87,11 @@ type execHelper struct {
 	ofctlPath      string
 	vsctlPath      string
 	appctlPath     string
+	ovnappctlPath  string
 	nbctlPath      string
 	sbctlPath      string
+	ovnctlPath     string
+	ovnRunDir      string
 	ipPath         string
 	powershellPath string
 	netshPath      string
@@ -109,6 +118,21 @@ func SetExec(exec kexec.Interface) error {
 	if err != nil {
 		return err
 	}
+	runner.ovnappctlPath, err = exec.LookPath(ovnAppctlCommand)
+	if err != nil {
+		// If ovn-appctl command is not available then fall back to
+		// ovs-appctl. It also means OVN is using the rundir of
+		// openvswitch.
+		runner.ovnappctlPath = runner.appctlPath
+		runner.ovnctlPath = "/usr/share/openvswitch/scripts/ovn-ctl"
+		runner.ovnRunDir = "/var/run/openvswitch/"
+	} else {
+		// If ovn-appctl command is available, it means OVN
+		// has its own separate rundir, logdir, sharedir.
+		runner.ovnctlPath = "/usr/share/ovn/scripts/ovn-ctl"
+		runner.ovnRunDir = "/var/run/ovn/"
+	}
+
 	runner.nbctlPath, err = exec.LookPath(ovnNbctlCommand)
 	if err != nil {
 		return err
@@ -117,6 +141,7 @@ func SetExec(exec kexec.Interface) error {
 	if err != nil {
 		return err
 	}
+
 	if runtime.GOOS == windowsOS {
 		runner.powershellPath, err = exec.LookPath(powershellCommand)
 		if err != nil {
@@ -322,6 +347,48 @@ func RunOVNSbctl(args ...string) (string, string, error) {
 	return RunOVNSbctlWithTimeout(ovsCommandTimeout, args...)
 }
 
+// RunOVNCtl runs an ovn-ctl command.
+func RunOVNCtl(args ...string) (string, string, error) {
+	stdout, stderr, err := runOVNretry(runner.ovnctlPath, nil, args...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// RunOVNNBAppCtl runs an 'ovn-appctl/ovs-appctl -t ovnRunDir + nbdbCtlSock command'.
+func RunOVNNBAppCtl(args ...string) (string, string, error) {
+	var cmdArgs []string
+	cmdArgs = []string{
+		"-t",
+		runner.ovnRunDir + nbdbCtlSock,
+	}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// RunOVNSBAppCtl runs an 'ovn-appctl/ovs-appctl -t ovnRunDir + sbdbCtlSock command'.
+func RunOVNSBAppCtl(args ...string) (string, string, error) {
+	var cmdArgs []string
+	cmdArgs = []string{
+		"-t",
+		runner.ovnRunDir + sbdbCtlSock,
+	}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// RunOVNNorthAppCtl runs an 'ovn-appctl/ovs-appctl -t ovn-northd command'.
+func RunOVNNorthAppCtl(args ...string) (string, string, error) {
+	var cmdArgs []string
+	cmdArgs = []string{
+		"-t",
+		"ovn-northd",
+	}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
 // RunIP runs a command via the iproute2 "ip" utility
 func RunIP(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.ipPath, args...)
@@ -359,4 +426,9 @@ func RawExec(cmdPath string, args ...string) (string, string, error) {
 	}
 	stdout, stderr, err := run(cmdPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
+}
+
+// GetOvnRunDir returns the OVN's rundir.
+func GetOvnRunDir() string {
+	return runner.ovnRunDir
 }

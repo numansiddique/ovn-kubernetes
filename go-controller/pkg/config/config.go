@@ -74,6 +74,9 @@ var (
 
 	// UnprivilegedMode allows ovnkube-node to run without SYS_ADMIN capability, by performing interface setup in the CNI plugin
 	UnprivilegedMode bool
+
+	// ManageDbServers allows managing the ovsdb-servers in active/standby using the unix socket path.
+	ManageDBServers bool
 )
 
 const (
@@ -137,6 +140,7 @@ type KubernetesConfig struct {
 	ServiceCIDR        string `gcfg:"service-cidr"`
 	OVNConfigNamespace string `gcfg:"ovn-config-namespace"`
 	MetricsBindAddress string `gcfg:"metrics-bind-address"`
+	PodIP              string `gcfg:"pod-ip"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -401,6 +405,11 @@ var CommonFlags = []cli.Flag{
 		Usage:       "Run ovnkube-node container in unprivileged mode. Valid only with --init-node option.",
 		Destination: &UnprivilegedMode,
 	},
+	cli.BoolFlag{
+		Name:        "manage-db-servers",
+		Usage:       "Manages the OVN North and South DB servers in active/passive",
+		Destination: &ManageDBServers,
+	},
 
 	// Logging options
 	cli.IntFlag{
@@ -479,6 +488,11 @@ var K8sFlags = []cli.Flag{
 		Name:        "metrics-bind-address",
 		Usage:       "The IP address and port for the metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
 		Destination: &cliConfig.Kubernetes.MetricsBindAddress,
+	},
+	cli.StringFlag{
+		Name:        "pod-ip",
+		Usage:       "specify the ovnkube pod IP.",
+		Destination: &cliConfig.Kubernetes.PodIP,
 	},
 }
 
@@ -716,6 +730,11 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", Kubernetes.ServiceCIDR, err)
 	}
 
+	if Kubernetes.PodIP != "" {
+		if ip := net.ParseIP(Kubernetes.PodIP); ip == nil {
+			return fmt.Errorf("Pod IP is invalid")
+		}
+	}
 	return nil
 }
 
@@ -1014,6 +1033,12 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 		}
 		auth.Scheme = OvnDBSchemeUnix
 		return auth, nil
+	} else if ManageDBServers {
+		if northbound {
+			panic("--nb-address is not allowed with --manage-db-servers.")
+		} else {
+			panic("--sb-address is not allowed with --manage-db-servers.")
+		}
 	}
 
 	var err error
