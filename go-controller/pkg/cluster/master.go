@@ -71,6 +71,11 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 	return cluster.watchNodes()
 }
 
+//StopClusterMaster stops the cluster master.
+func (cluster *OvnClusterController) StopClusterMaster() {
+	cluster.watchFactory.RemoveHandlers()
+}
+
 // SetupMaster creates the central router and load-balancers for the network
 func (cluster *OvnClusterController) SetupMaster(masterNodeName string) error {
 	if err := setupOVNMaster(masterNodeName); err != nil {

@@ -124,9 +124,8 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	return wf, nil
 }
 
-// Shutdown removes all handlers
-func (wf *WatchFactory) Shutdown() {
-	close(wf.stopChan)
+//RemoveHandlers removes all the registered handles
+func (wf *WatchFactory) RemoveHandlers() {
 	for _, inf := range wf.informers {
 		inf.Lock()
 		defer inf.Unlock()
@@ -136,6 +135,12 @@ func (wf *WatchFactory) Shutdown() {
 			}
 		}
 	}
+}
+
+// Shutdown closes the channel and removes all handlers
+func (wf *WatchFactory) Shutdown() {
+	close(wf.stopChan)
+	wf.RemoveHandlers()
 }
 
 func (wf *WatchFactory) newFederatedHandler(inf *informer) cache.ResourceEventHandlerFuncs {
