@@ -123,6 +123,7 @@ type KubernetesConfig struct {
 	Token              string `gcfg:"token"`
 	ServiceCIDR        string `gcfg:"service-cidr"`
 	OVNConfigNamespace string `gcfg:"ovn-config-namespace"`
+	PodIP              string `gcfg:"pod-ip"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -376,6 +377,10 @@ var CommonFlags = []cli.Flag{
 			"entry.",
 		Destination: &cliConfig.Default.RawClusterSubnets,
 	},
+	cli.BoolFlag{
+		Name:  "manage-db-servers",
+		Usage: "Manages the OVN North and South DB servers in active/passive",
+	},
 
 	// Logging options
 	cli.IntFlag{
@@ -449,6 +454,11 @@ var K8sFlags = []cli.Flag{
 		Name:        "ovn-config-namespace",
 		Usage:       "specify a namespace which will contain services to config the OVN databases",
 		Destination: &cliConfig.Kubernetes.OVNConfigNamespace,
+	},
+	cli.StringFlag{
+		Name:        "pod-ip",
+		Usage:       "specify the ovnkube pod IP.",
+		Destination: &cliConfig.Kubernetes.PodIP,
 	},
 }
 
@@ -691,6 +701,11 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", Kubernetes.ServiceCIDR, err)
 	}
 
+	if Kubernetes.PodIP != "" {
+		if ip := net.ParseIP(Kubernetes.PodIP); ip == nil {
+			return fmt.Errorf("Pod IP is invalid")
+		}
+	}
 	return nil
 }
 
