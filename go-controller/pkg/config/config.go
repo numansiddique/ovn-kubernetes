@@ -116,6 +116,7 @@ type KubernetesConfig struct {
 	Token              string `gcfg:"token"`
 	ServiceCIDR        string `gcfg:"service-cidr"`
 	OVNConfigNamespace string `gcfg:"ovn-config-namespace"`
+	OVNKubePodIP       string `gcfg:"ovnkube-pod-ip"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -307,6 +308,10 @@ var CommonFlags = []cli.Flag{
 		Usage: "initialize master, requires the hostname as argument",
 	},
 	cli.StringFlag{
+		Name:  "init-ha-master",
+		Usage: "initialize master in HA, requires the hostname as argument",
+	},
+	cli.StringFlag{
 		Name:  "init-node",
 		Usage: "initialize node, requires the name that node is registered with in kubernetes cluster",
 	},
@@ -426,6 +431,11 @@ var K8sFlags = []cli.Flag{
 		Name:        "ovn-config-namespace",
 		Usage:       "specify a namespace which will contain services to config the OVN databases",
 		Destination: &cliConfig.Kubernetes.OVNConfigNamespace,
+	},
+	cli.StringFlag{
+		Name:        "ovnkube-pod-ip",
+		Usage:       "specify the ovnkube pod IP.",
+		Destination: &cliConfig.Kubernetes.OVNKubePodIP,
 	},
 }
 

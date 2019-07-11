@@ -188,8 +188,13 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	master := ctx.String("init-master")
+	haMaster := ctx.String("init-ha-master")
 	node := ctx.String("init-node")
 	clusterController := ovncluster.NewClusterController(clientset, factory)
+
+	if master != "" && haMaster != "" {
+		panic("Cannot specify 'init-master' and 'init-ha-master' together.")
+	}
 
 	cleanupNode := ctx.String("cleanup-node")
 	if cleanupNode != "" {
@@ -205,16 +210,36 @@ func runOvnKube(ctx *cli.Context) error {
 		return nil
 	}
 
-	if master != "" || node != "" {
+	if master != "" || node != "" || haMaster != "" {
 		clusterController.ClusterIPNet, err = parseClusterSubnetEntries(ctx.String("cluster-subnet"))
 		if err != nil {
 			panic(err.Error())
+		}
+
+		if haMaster != "" {
+			if runtime.GOOS == "windows" {
+				panic("Windows is not supported as ha master node")
+			}
+
+			// Check if the pod ip is set or not.
+			if ip := net.ParseIP(config.Kubernetes.OVNKubePodIP); ip == nil {
+				panic("ovnkube-pod-ip is invalid or not provided.")
+			}
+
+			// Start the HA master cluster.
+			haCluster := ovncluster.NewHAMasterController(clientset, clusterController, haMaster)
+			err := haCluster.StartHAMasterCluster()
+			if err != nil {
+				logrus.Errorf(err.Error())
+				panic(err.Error())
+			}
 		}
 
 		if master != "" {
 			if runtime.GOOS == "windows" {
 				panic("Windows is not supported as master node")
 			}
+
 			// run the cluster controller to init the master
 			err := clusterController.StartClusterMaster(master)
 			if err != nil {
