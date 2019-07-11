@@ -20,7 +20,6 @@ import (
 	ovncluster "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cluster"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kexec "k8s.io/utils/exec"
@@ -216,13 +215,8 @@ func runOvnKube(ctx *cli.Context) error {
 				panic("Windows is not supported as master node")
 			}
 			// run the cluster controller to init the master
-			err := clusterController.StartClusterMaster(master)
+			err := clusterController.StartHAMasterCluster(master)
 			if err != nil {
-				logrus.Errorf(err.Error())
-				panic(err.Error())
-			}
-			ovnController := ovn.NewOvnController(clientset, factory)
-			if err := ovnController.Run(); err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
 			}

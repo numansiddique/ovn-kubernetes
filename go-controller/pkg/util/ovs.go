@@ -27,6 +27,7 @@ const (
 	ovsOfctlCommand   = "ovs-ofctl"
 	ovnNbctlCommand   = "ovn-nbctl"
 	ovnSbctlCommand   = "ovn-sbctl"
+	ovnctlCommand     = "ovn-ctl"
 	ipCommand         = "ip"
 	powershellCommand = "powershell"
 	netshCommand      = "netsh"
@@ -81,6 +82,7 @@ type execHelper struct {
 	vsctlPath      string
 	nbctlPath      string
 	sbctlPath      string
+	ovnctlPath     string
 	ipPath         string
 	powershellPath string
 	netshPath      string
@@ -111,6 +113,7 @@ func SetExec(exec kexec.Interface) error {
 	if err != nil {
 		return err
 	}
+	runner.ovnctlPath = "/usr/share/openvswitch/scripts/ovn-ctl"
 	if runtime.GOOS == windowsOS {
 		runner.powershellPath, err = exec.LookPath(powershellCommand)
 		if err != nil {
@@ -276,6 +279,12 @@ func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 // RunOVNSbctl runs a command via ovn-sbctl.
 func RunOVNSbctl(args ...string) (string, string, error) {
 	return RunOVNSbctlWithTimeout(ovsCommandTimeout, args...)
+}
+
+// RunOVNCtl runs an ovn-ctl command.
+func RunOVNCtl(args ...string) (string, string, error) {
+	stdout, stderr, err := runOVNretry(runner.ovnctlPath, args...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
 // RunIP runs a command via the iproute2 "ip" utility

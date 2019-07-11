@@ -126,7 +126,12 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 
 // Shutdown removes all handlers
 func (wf *WatchFactory) Shutdown() {
-	close(wf.stopChan)
+	select {
+	case <-wf.stopChan:
+	default:
+		close(wf.stopChan)
+	}
+
 	for _, inf := range wf.informers {
 		inf.Lock()
 		defer inf.Unlock()

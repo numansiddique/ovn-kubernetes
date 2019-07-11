@@ -8,6 +8,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/client-go/kubernetes"
 )
@@ -15,11 +16,13 @@ import (
 // OvnClusterController is the object holder for utilities meant for cluster management
 type OvnClusterController struct {
 	Kube                      kube.Interface
+	kubeClient                kubernetes.Interface
 	watchFactory              *factory.WatchFactory
+	haWatchFactory            *factory.WatchFactory
 	masterSubnetAllocatorList []*netutils.SubnetAllocator
-
-	TCPLoadBalancerUUID string
-	UDPLoadBalancerUUID string
+	ovnController             *ovn.Controller
+	TCPLoadBalancerUUID       string
+	UDPLoadBalancerUUID       string
 
 	ClusterIPNet []CIDRNetworkEntry
 }
@@ -41,8 +44,11 @@ const (
 // a given resource type (either Namespace or Node)
 func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFactory) *OvnClusterController {
 	return &OvnClusterController{
-		Kube:         &kube.Kube{KClient: kubeClient},
-		watchFactory: wf,
+		Kube:           &kube.Kube{KClient: kubeClient},
+		kubeClient:     kubeClient,
+		watchFactory:   wf,
+		haWatchFactory: nil,
+		ovnController:  nil,
 	}
 }
 
