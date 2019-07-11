@@ -74,6 +74,9 @@ var (
 
 	// UnprivilegedMode allows ovnkube-node to run without SYS_ADMIN capability, by performing interface setup in the CNI plugin
 	UnprivilegedMode bool
+
+	// ManageDbServers allows managing the ovsdb-servers in active/standby using the unix socket path.
+	ManageDBServers bool
 )
 
 const (
@@ -136,6 +139,7 @@ type KubernetesConfig struct {
 	Token              string `gcfg:"token"`
 	ServiceCIDR        string `gcfg:"service-cidr"`
 	OVNConfigNamespace string `gcfg:"ovn-config-namespace"`
+	PodIP              string `gcfg:"pod-ip"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -404,6 +408,11 @@ var CommonFlags = []cli.Flag{
 		Usage:       "Run ovnkube-node container in unprivileged mode. Valid only with --init-node option.",
 		Destination: &UnprivilegedMode,
 	},
+	cli.BoolFlag{
+		Name:        "manage-db-servers",
+		Usage:       "Manages the OVN North and South DB servers in active/passive",
+		Destination: &ManageDBServers,
+	},
 
 	// Logging options
 	cli.IntFlag{
@@ -477,6 +486,11 @@ var K8sFlags = []cli.Flag{
 		Name:        "ovn-config-namespace",
 		Usage:       "specify a namespace which will contain services to config the OVN databases",
 		Destination: &cliConfig.Kubernetes.OVNConfigNamespace,
+	},
+	cli.StringFlag{
+		Name:        "pod-ip",
+		Usage:       "specify the ovnkube pod IP.",
+		Destination: &cliConfig.Kubernetes.PodIP,
 	},
 }
 
@@ -719,6 +733,11 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", Kubernetes.ServiceCIDR, err)
 	}
 
+	if Kubernetes.PodIP != "" {
+		if ip := net.ParseIP(Kubernetes.PodIP); ip == nil {
+			return fmt.Errorf("Pod IP is invalid")
+		}
+	}
 	return nil
 }
 
@@ -1019,6 +1038,13 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 		}
 		auth.Scheme = OvnDBSchemeUnix
 		return auth, nil
+	} else if ManageDBServers {
+		if northbound {
+			logrus.Warnf("nb-address is being ignored when specified with --manage-db-servers")
+		} else {
+			logrus.Warnf("sb-address is being ignored when specified with --manage-db-servers")
+		}
+		auth.Scheme = OvnDBSchemeUnix
 	}
 
 	var err error

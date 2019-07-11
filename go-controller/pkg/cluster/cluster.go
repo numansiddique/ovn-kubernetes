@@ -9,6 +9,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -96,4 +97,31 @@ func setupOVNMaster(nodeName string) error {
 		}
 	}
 	return nil
+}
+
+func validateOVNConfigEndpoint(ep *kapi.Endpoints) bool {
+	return len(ep.Subsets) == 1 && len(ep.Subsets[0].Ports) == 2 && len(ep.Subsets[0].Addresses) > 0
+}
+
+func extractDbRemotesFromEndpoint(ep *kapi.Endpoints) ([]string, int32, int32, error) {
+	var nbDBPort int32
+	var sbDBPort int32
+	var masterIPList []string
+
+	if !validateOVNConfigEndpoint(ep) {
+		return masterIPList, nbDBPort, sbDBPort, fmt.Errorf("endpoint %s is not in the right format to configure OVN", ep.Name)
+	}
+
+	for _, ovnDB := range ep.Subsets[0].Ports {
+		if ovnDB.Name == "south" {
+			sbDBPort = ovnDB.Port
+		} else if ovnDB.Name == "north" {
+			nbDBPort = ovnDB.Port
+		}
+	}
+	for _, address := range ep.Subsets[0].Addresses {
+		masterIPList = append(masterIPList, address.IP)
+	}
+
+	return masterIPList, sbDBPort, nbDBPort, nil
 }
