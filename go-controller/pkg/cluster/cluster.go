@@ -3,12 +3,14 @@ package cluster
 import (
 	"fmt"
 	"net"
+	"strconv"
 
 	"github.com/openshift/origin/pkg/util/netutils"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -103,4 +105,31 @@ func setupOVNMaster(nodeName string) error {
 		}
 	}
 	return nil
+}
+
+func validateOVNConfigEndpoint(ep *kapi.Endpoints) bool {
+	return len(ep.Subsets) == 1 && len(ep.Subsets[0].Ports) == 2 && len(ep.Subsets[0].Addresses) > 0
+}
+
+func extractDbRemotesFromEndpoint(ep *kapi.Endpoints) ([]string, string, string, error) {
+	var nbDBPort string
+	var sbDBPort string
+	var masterIPList []string
+
+	if !validateOVNConfigEndpoint(ep) {
+		return masterIPList, nbDBPort, sbDBPort, fmt.Errorf("endpoint %s is not in the right format to configure OVN", ep.Name)
+	}
+
+	for _, ovnDB := range ep.Subsets[0].Ports {
+		if ovnDB.Name == "south" {
+			sbDBPort = strconv.Itoa(int(ovnDB.Port))
+		} else if ovnDB.Name == "north" {
+			nbDBPort = strconv.Itoa(int(ovnDB.Port))
+		}
+	}
+	for _, address := range ep.Subsets[0].Addresses {
+		masterIPList = append(masterIPList, address.IP)
+	}
+
+	return masterIPList, sbDBPort, nbDBPort, nil
 }

@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
 // Interface represents the exported methods for dealing with getting/setting
@@ -25,7 +26,11 @@ type Interface interface {
 	GetNode(name string) (*kapi.Node, error)
 	GetService(namespace, name string) (*kapi.Service, error)
 	GetEndpoints(namespace string) (*kapi.EndpointsList, error)
+	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
+	CreateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error)
+	UpdateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error)
 	GetNamespaces() (*kapi.NamespaceList, error)
+	CoreV1() corev1.CoreV1Interface
 }
 
 // Kube is the structure object upon which the Interface is implemented
@@ -103,7 +108,27 @@ func (k *Kube) GetEndpoints(namespace string) (*kapi.EndpointsList, error) {
 	return k.KClient.CoreV1().Endpoints(namespace).List(metav1.ListOptions{})
 }
 
+// GetEndpoint returns the Endpoints resource
+func (k *Kube) GetEndpoint(namespace, name string) (*kapi.Endpoints, error) {
+	return k.KClient.CoreV1().Endpoints(namespace).Get(name, metav1.GetOptions{})
+}
+
+// CreateEndpoint creates the Endpoints resource
+func (k *Kube) CreateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error) {
+	return k.KClient.CoreV1().Endpoints(namespace).Create(ep)
+}
+
+// UpdateEndpoint updates the Endpoints resource
+func (k *Kube) UpdateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error) {
+	return k.KClient.CoreV1().Endpoints(namespace).Update(ep)
+}
+
 // GetNamespaces returns all Namespace resource from kubernetes apiserver
 func (k *Kube) GetNamespaces() (*kapi.NamespaceList, error) {
 	return k.KClient.CoreV1().Namespaces().List(metav1.ListOptions{})
+}
+
+// CoreV1 returns a CoreV1 interface
+func (k *Kube) CoreV1() corev1.CoreV1Interface {
+	return k.KClient.CoreV1()
 }
