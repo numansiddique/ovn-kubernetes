@@ -39,7 +39,8 @@
 # OVN_NET_CIDR - the network cidr
 # OVN_SVC_CIDR - the cluster-service-cidr
 # OVN_KUBERNETES_NAMESPACE - k8s namespace
-#
+# OVNKUBE_POD_IP - The pod IP allocated by k8s
+
 # The following variables are optional and can override internally derived values.
 # OVN_NORTH - the full URL to the ovn northdb
 # OVN_SOUTH - the full URL to the ovn southdb
@@ -126,6 +127,7 @@ net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
 
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
+ovnkube_pod_ip=${OVNKUBE_POD_IP:=""}
 
 # host on which ovnkube-db POD is running and this POD contains both
 # OVN NB and SB DB running in their own container
@@ -626,6 +628,44 @@ run-ovn-northd () {
   exit 8
 }
 
+# v3 - Runs northd on master. Does not run nb_ovsdb, and sb_ovsdb
+# communicates to the OVN db servers using unix socket.
+run-ovn-northd-localdb () {
+  check_ovn_daemonset_version "3"
+  rm -f /var/run/openvswitch/ovn-northd.pid
+
+  # Make sure /var/lib/openvswitch exists
+  mkdir -p /var/lib/openvswitch
+
+  echo "=============== run-ovn-northd (wait for ready_to_start_node)"
+  wait_for_event ready_to_start_node
+
+  sleep 1
+
+  echo "=============== run_ovn_northd ========== MASTER ONLY"
+  echo "ovn_db_host ${ovn_db_host}"
+  echo "ovn_northd_opts=${ovn_northd_opts}"
+  echo "ovn_log_northd=${ovn_log_northd}"
+
+  # no monitor (and no detach), start northd which connects to the
+  # OVN db servers using unix socket.
+  /usr/share/openvswitch/scripts/ovn-ctl start_northd \
+    --no-monitor --ovn-manage-ovsdb=no \
+    --ovn-northd-log="${ovn_log_northd}" \
+    ${ovn_northd_opts}
+
+  wait_for_event pid_ready ovn-northd.pid
+  echo "=============== run_ovn_northd ========== RUNNING"
+  sleep 1
+
+  tail --follow=name /var/log/openvswitch/ovn-northd.log &
+  ovn_tail_pid=$!
+
+
+  pid_health /var/run/openvswitch/ovn-northd.pid ${ovn_tail_pid}
+  exit 8
+}
+
 # v2 - Runs all 3 northd processes
 ovn-northd () {
   check_ovn_daemonset_version "2"
@@ -690,6 +730,45 @@ ovn-master () {
   kube_tail_pid=$!
 
   process_healthy ovnkube-master ${kube_tail_pid}
+  exit 9
+}
+
+# v2 v3 - run ovnkube --ha master
+ovn-ha-master () {
+  trap 'kill $(jobs -p); exit 0' TERM
+  check_ovn_daemonset_version "2 3"
+  rm -f /var/run/openvswitch/ovnkube-master.pid
+
+  echo "=============== ovn-master (wait for ready_to_start_node) ========== MASTER ONLY"
+  wait_for_event ready_to_start_node
+  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
+
+  # wait for northd to start
+  wait_for_event pid_ready ovn-northd.pid
+  sleep 5
+
+  # wait for ovs-servers to start since ovn-master sets some fields in OVS DB
+  echo "=============== ovn-master - (wait for ovs)"
+  wait_for_event ovs_ready
+
+  echo "=============== ovn-master ========== MASTER ONLY"
+  /usr/bin/ovnkube \
+    --init-master ${ovn_pod_host} \
+    --cluster-subnet ${net_cidr} --k8s-service-cidr=${svc_cidr} \
+    --nodeport \
+    --manage-db-servers \
+    --ovnkube-pod-ip ${ovnkube_pod_ip} \
+    --loglevel=${ovnkube_loglevel} \
+    --pidfile /var/run/openvswitch/ovnkube-master.pid \
+    --logfile /var/log/ovn-kubernetes/ovnkube-master.log &
+  echo "=============== ovn-master ========== running"
+  wait_for_event pid_ready ovnkube-master.pid
+  sleep 1
+
+  tail --follow=name /var/log/ovn-kubernetes/ovnkube-master.log &
+  kube_tail_pid=$!
+
+  pid_health /var/run/openvswitch/ovnkube-master.pid ${kube_tail_pid}
   exit 9
 }
 
@@ -911,6 +990,11 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
     "ovn-master")      # pod ovnkube-master container ovnkube-master
 	ovn-master
     ;;
+
+    "ovn-ha-master")   # pod ovnkube-master container ovnkube-ha-master
+	ovn-ha-master
+    ;;
+
     "ovs-server")      # pod ovnkube-node container ovs-daemons
         ovs-server
     ;;
@@ -923,6 +1007,10 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
     "ovn-northd")
 	ovn-northd
     ;;
+
+    "ovn-northd-localdb")
+	run-ovn-northd-localdb
+
     "display_env")
         display_env
 	exit 0

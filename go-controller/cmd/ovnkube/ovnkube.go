@@ -20,7 +20,6 @@ import (
 	ovncluster "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cluster"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kexec "k8s.io/utils/exec"
@@ -213,16 +212,21 @@ func runOvnKube(ctx *cli.Context) error {
 
 		if master != "" {
 			if runtime.GOOS == "windows" {
-				panic("Windows is not supported as master node")
+				panic("Windows is not supported as ha master node")
 			}
-			// run the cluster controller to init the master
-			err := clusterController.StartClusterMaster(master)
+
+			manageDBServers := ctx.Bool("manage-db-servers")
+			// Check if the pod ip is set or not if manageDBServers is set
+			if manageDBServers {
+				if ip := net.ParseIP(config.Kubernetes.OVNKubePodIP); ip == nil {
+					panic("ovnkube-pod-ip is invalid or not provided.")
+				}
+			}
+
+			// Start the HA master cluster.
+			haCluster := ovncluster.NewHAMasterController(clientset, clusterController, master, manageDBServers)
+			err := haCluster.StartHAMasterCluster()
 			if err != nil {
-				logrus.Errorf(err.Error())
-				panic(err.Error())
-			}
-			ovnController := ovn.NewOvnController(clientset, factory)
-			if err := ovnController.Run(); err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
 			}
