@@ -205,15 +205,22 @@ func runOvnKube(ctx *cli.Context) error {
 		return nil
 	}
 
-	clusterController := ovncluster.NewClusterController(clientset, factory)
 	if master != "" || node != "" {
+		nodeName, err := validateNodeName(master, node)
+		if err != nil {
+			logrus.Errorf(err.Error())
+			panic(err.Error())
+		}
+
+		var clusterController ovncluster.ClusterController
+
+		clusterController = ovncluster.NewClusterController(clientset, factory, nodeName)
 		if master != "" {
 			if runtime.GOOS == "windows" {
 				panic("Windows is not supported as master node")
 			}
 			// run the cluster controller to init the master
-			err := clusterController.StartClusterMaster(master)
-			if err != nil {
+			if err := clusterController.StartMaster(); err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
 			}
@@ -229,8 +236,7 @@ func runOvnKube(ctx *cli.Context) error {
 				panic("Cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 			}
 
-			err := clusterController.StartClusterNode(node)
-			if err != nil {
+			if err := clusterController.StartNode(); err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
 			}
@@ -241,4 +247,17 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	return fmt.Errorf("need to run ovnkube in either master and/or node mode")
+}
+
+func validateNodeName(master, node string) (string, error) {
+	// If both master & node are enabled, make sure they use the
+	// same node name
+	if master != "" && node != "" && master != node {
+		return "", fmt.Errorf("Master name %q must match node name %q", master, node)
+	}
+
+	if master != "" {
+		return master, nil
+	}
+	return node, nil
 }

@@ -17,9 +17,15 @@ type OvnClusterController struct {
 	Kube                      kube.Interface
 	watchFactory              *factory.WatchFactory
 	masterSubnetAllocatorList []*netutils.SubnetAllocator
+	nodeName                  string
 
 	TCPLoadBalancerUUID string
 	UDPLoadBalancerUUID string
+}
+
+type ClusterController interface {
+	StartMaster() error
+	StartNode() error
 }
 
 const (
@@ -31,10 +37,11 @@ const (
 
 // NewClusterController creates a new controller for IP subnet allocation to
 // a given resource type (either Namespace or Node)
-func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFactory) *OvnClusterController {
+func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, nodeName string) *OvnClusterController {
 	return &OvnClusterController{
 		Kube:         &kube.Kube{KClient: kubeClient},
 		watchFactory: wf,
+		nodeName:     nodeName,
 	}
 }
 

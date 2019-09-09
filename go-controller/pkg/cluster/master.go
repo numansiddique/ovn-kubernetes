@@ -15,7 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
+// Start runs a subnet IPAM and a controller that watches arrival/departure
 // of nodes in the cluster
 // On an addition to the cluster (node create), a new subnet is created for it that will translate
 // to creation of a logical switch (done by the node, but could be created here at the master process too)
@@ -23,7 +23,7 @@ import (
 //
 // TODO: Verify that the cluster was not already called with a different global subnet
 //  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
-func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) error {
+func (cluster *OvnClusterController) StartMaster() error {
 
 	alreadyAllocated := make([]string, 0)
 	existingNodes, err := cluster.Kube.GetNodes()
@@ -60,7 +60,7 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 	}
 	cluster.masterSubnetAllocatorList = masterSubnetAllocatorList
 
-	if err := cluster.SetupMaster(masterNodeName); err != nil {
+	if err := cluster.SetupMaster(); err != nil {
 		logrus.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
@@ -73,8 +73,8 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 }
 
 // SetupMaster creates the central router and load-balancers for the network
-func (cluster *OvnClusterController) SetupMaster(masterNodeName string) error {
-	if err := setupOVNMaster(masterNodeName); err != nil {
+func (cluster *OvnClusterController) SetupMaster() error {
+	if err := setupOVNMaster(cluster.nodeName); err != nil {
 		return err
 	}
 

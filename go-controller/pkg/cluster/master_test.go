@@ -126,12 +126,12 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer f.Shutdown()
 
-			clusterController := NewClusterController(fakeClient, f)
+			clusterController := NewClusterController(fakeClient, f, "master")
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 
-			err = clusterController.StartClusterMaster("master")
+			err = clusterController.StartMaster()
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
@@ -188,12 +188,12 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer f.Shutdown()
 
-			clusterController := NewClusterController(fakeClient, f)
+			clusterController := NewClusterController(fakeClient, f, "master")
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 
-			err = clusterController.StartClusterMaster("master")
+			err = clusterController.StartMaster()
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
@@ -308,7 +308,7 @@ subnet=%s
 			Expect(err).NotTo(HaveOccurred())
 			defer f.Shutdown()
 
-			clusterController := NewClusterController(fakeClient, f)
+			clusterController := NewClusterController(fakeClient, f, "node")
 			Expect(clusterController).NotTo(BeNil())
 
 			// Initialize OVS/OVN connection methods

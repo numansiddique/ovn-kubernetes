@@ -22,7 +22,7 @@ import (
 
 // StartClusterNode learns the subnet assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
-func (cluster *OvnClusterController) StartClusterNode(name string) error {
+func (cluster *OvnClusterController) StartNode() error {
 	var err error
 	var node *kapi.Node
 	var subnet *net.IPNet
@@ -35,17 +35,17 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
 	if err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
-		node, err = cluster.Kube.GetNode(name)
+		node, err = cluster.Kube.GetNode(cluster.nodeName)
 		if err != nil {
-			logrus.Errorf("Error starting node %s, no node found - %v", name, err)
+			logrus.Errorf("Error starting node %s, no node found - %v", cluster.nodeName, err)
 			return false, nil
 		}
-		if cidr, _, err = util.RunOVNNbctl("get", "logical_switch", node.Name, "other-config:subnet"); err != nil {
+		if cidr, _, err = util.RunOVNNbctl("get", "logical_switch", cluster.nodeName, "other-config:subnet"); err != nil {
 			return false, nil
 		}
 		return true, nil
 	}); err != nil {
-		logrus.Errorf("timed out waiting for node %q logical switch: %v", name, err)
+		logrus.Errorf("timed out waiting for node %q logical switch: %v", cluster.nodeName, err)
 		return err
 	}
 
@@ -62,7 +62,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		return err
 	}
 
-	err = setupOVNNode(name)
+	err = setupOVNNode(node.Name)
 	if err != nil {
 		return err
 	}
