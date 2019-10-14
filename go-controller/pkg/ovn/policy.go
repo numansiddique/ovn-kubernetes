@@ -2,6 +2,8 @@ package ovn
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
@@ -9,7 +11,6 @@ import (
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
-	"strings"
 )
 
 func (oc *Controller) syncNetworkPoliciesPortGroup(
@@ -484,7 +485,7 @@ func (oc *Controller) handleLocalPodSelector(
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				oc.handleLocalPodSelectorAddFunc(policy, np, newObj)
 			},
-		}, nil)
+		}, nil, false)
 	if err != nil {
 		logrus.Errorf("error watching local pods for policy %s in namespace %s: %v",
 			policy.Name, policy.Namespace, err)
@@ -529,7 +530,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 						UpdateFunc: func(oldObj, newObj interface{}) {
 							oc.handlePeerPodSelectorAddUpdate(policy, np, addressMap, addressSet, newObj)
 						},
-					}, nil)
+					}, nil, false)
 				if err != nil {
 					logrus.Errorf("error watching pods in namespace %s for policy %s: %v", namespace.Name, policy.Name, err)
 					return
@@ -548,7 +549,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				return
 			},
-		}, nil)
+		}, nil, false)
 	if err != nil {
 		logrus.Errorf("error watching namespaces for policy %s: %v",
 			policy.Name, err)
@@ -630,7 +631,7 @@ func (oc *Controller) handlePeerPodSelector(
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				oc.handlePeerPodSelectorAddUpdate(policy, np, addressMap, addressSet, newObj)
 			},
-		}, nil)
+		}, nil, false)
 	if err != nil {
 		logrus.Errorf("error watching peer pods for policy %s in namespace %s: %v",
 			policy.Name, policy.Namespace, err)
@@ -711,7 +712,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				return
 			},
-		}, nil)
+		}, nil, false)
 	if err != nil {
 		logrus.Errorf("error watching namespaces for policy %s: %v",
 			policy.Name, err)

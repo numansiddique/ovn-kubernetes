@@ -113,8 +113,10 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory)
 
 // Run starts the actual watching.
 func (oc *Controller) Run() error {
-	for _, f := range []func() error{oc.WatchPods, oc.WatchServices, oc.WatchEndpoints, oc.WatchNamespaces,
-		oc.WatchNetworkPolicy, oc.WatchNodes} {
+	// Might need to re-work this mechanism in the future. This is a deterministic ordering of watchers,
+	// which is required to work in this specific order. I.e: as to set up pods, we first need to set up nodes
+	// (for the logical switch, for ex)
+	for _, f := range []func() error{oc.WatchNodes, oc.WatchNamespaces, oc.WatchPods, oc.WatchNetworkPolicy, oc.WatchServices, oc.WatchEndpoints} {
 		if err := f(); err != nil {
 			return err
 		}
@@ -149,20 +151,20 @@ func (oc *Controller) WatchPods() error {
 // WatchServices starts the watching of Service resource and calls back the
 // appropriate handler logic
 func (oc *Controller) WatchServices() error {
-	_, err := oc.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+	_, err := oc.watchFactory.AddFilteredServiceHandler(config.Kubernetes.OVNConfigNamespace, cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(obj interface{}) {},
 		UpdateFunc: func(old, new interface{}) {},
 		DeleteFunc: func(obj interface{}) {
 			service := obj.(*kapi.Service)
 			oc.deleteService(service)
 		},
-	}, oc.syncServices)
+	}, oc.syncServices, true)
 	return err
 }
 
 // WatchEndpoints starts the watching of Endpoint resource and calls back the appropriate handler logic
 func (oc *Controller) WatchEndpoints() error {
-	_, err := oc.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+	_, err := oc.watchFactory.AddFilteredEndpointsHandler(config.Kubernetes.OVNConfigNamespace, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
 			err := oc.AddEndpoints(ep)
@@ -195,7 +197,7 @@ func (oc *Controller) WatchEndpoints() error {
 				logrus.Errorf("Error in deleting endpoints - %v", err)
 			}
 		},
-	}, nil)
+	}, nil, true)
 	return err
 }
 

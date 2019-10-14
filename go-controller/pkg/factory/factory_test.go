@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -188,7 +188,7 @@ var _ = Describe("Watch Factory Operations", func() {
 				cache.ResourceEventHandlerFuncs{},
 				func(objs []interface{}) {
 					Expect(len(objs)).To(Equal(1))
-				})
+				}, false)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(h).NotTo(BeNil())
 			wf.removeHandler(objType, h)
@@ -246,7 +246,7 @@ var _ = Describe("Watch Factory Operations", func() {
 					},
 					UpdateFunc: func(old, new interface{}) {},
 					DeleteFunc: func(obj interface{}) {},
-				}, nil)
+				}, nil, false)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(numAdded).To(Equal(2))
 			wf.removeHandler(objType, h)
@@ -307,7 +307,7 @@ var _ = Describe("Watch Factory Operations", func() {
 				numDeleted++
 				funcs.DeleteFunc(obj)
 			},
-		}, nil)
+		}, nil, false)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(h).NotTo(BeNil())
 		return h

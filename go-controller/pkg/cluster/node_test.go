@@ -168,7 +168,7 @@ var _ = Describe("Node Operations", func() {
 			Expect(config.OvnNorth.Address).To(Equal("tcp:1.1.1.1:6641"), "config.OvnNorth.Address does not equal cli arg")
 			Expect(config.OvnSouth.Address).To(Equal("tcp:1.1.1.1:6642"), "config.OvnSouth.Address does not equal cli arg")
 
-			err = cluster.watchConfigEndpoints()
+			err = cluster.watchConfigEndpoints(make(chan bool, 1))
 			Expect(err).NotTo(HaveOccurred())
 
 			// Kubernetes endpoints should eventually propogate to OvnNorth/OvnSouth
@@ -185,83 +185,5 @@ var _ = Describe("Node Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 	})
-	It("test watchConfigEndpoints multiple IPs", func() {
-		app.Action = func(ctx *cli.Context) error {
 
-			const (
-				masterAddress1 string = "10.1.2.3"
-				masterAddress2 string = "11.1.2.3"
-				nbPort         int32  = 1234
-				sbPort         int32  = 4321
-			)
-
-			fexec := ovntest.NewFakeExec()
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-					"external_ids:ovn-nb=\"tcp:%s:%d,tcp:%s:%d\"",
-					masterAddress1, nbPort, masterAddress2, nbPort),
-			})
-
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-					"external_ids:ovn-remote=\"tcp:%s:%d,tcp:%s:%d\"",
-					masterAddress1, sbPort, masterAddress2, sbPort),
-			})
-
-			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
-
-			fakeClient := fake.NewSimpleClientset(&kapi.EndpointsList{
-				Items: []kapi.Endpoints{{
-					ObjectMeta: metav1.ObjectMeta{Namespace: "ovn-kubernetes", Name: "ovnkube-db"},
-					Subsets: []kapi.EndpointSubset{
-						{
-							Addresses: []kapi.EndpointAddress{
-								{IP: masterAddress1}, {IP: masterAddress2},
-							},
-							Ports: []kapi.EndpointPort{
-								{
-									Name: "north",
-									Port: nbPort,
-								},
-								{
-									Name: "south",
-									Port: sbPort,
-								},
-							},
-						},
-					},
-				}},
-			})
-			_, err = config.InitConfig(ctx, fexec, nil)
-			Expect(err).NotTo(HaveOccurred())
-
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
-			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
-
-			cluster := NewClusterController(fakeClient, f)
-			Expect(cluster).NotTo(BeNil())
-
-			Expect(config.OvnNorth.Address).To(Equal("tcp:1.1.1.1:6641"), "config.OvnNorth.Address does not equal cli arg")
-			Expect(config.OvnSouth.Address).To(Equal("tcp:1.1.1.1:6642"), "config.OvnSouth.Address does not equal cli arg")
-
-			err = cluster.watchConfigEndpoints()
-			Expect(err).NotTo(HaveOccurred())
-
-			// Kubernetes endpoints should eventually propogate to OvnNorth/OvnSouth
-			Eventually(func() string {
-				return config.OvnNorth.Address
-			}).Should(Equal(fmt.Sprintf("tcp:%s:%d,tcp:%s:%d", masterAddress1, nbPort, masterAddress2, nbPort)), "Northbound DB Port did not get set by watchConfigEndpoints")
-			Eventually(func() string {
-				return config.OvnSouth.Address
-			}).Should(Equal(fmt.Sprintf("tcp:%s:%d,tcp:%s:%d", masterAddress1, sbPort, masterAddress2, sbPort)), "Southbound DBPort did not get set by watchConfigEndpoints")
-
-			return nil
-		}
-		err := app.Run([]string{app.Name, "-nb-address=tcp://1.1.1.1:6641", "-sb-address=tcp://1.1.1.1:6642"})
-		Expect(err).NotTo(HaveOccurred())
-
-	})
 })

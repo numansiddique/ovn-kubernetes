@@ -53,27 +53,6 @@ var _ = Describe("Util tests", func() {
 				expectedResult: true,
 			},
 			{
-				name: "valid endpoint, multiple IPs",
-				subsets: []kapi.EndpointSubset{
-					{
-						Addresses: []kapi.EndpointAddress{
-							{IP: "10.1.2.3"}, {IP: "11.1.2.3"},
-						},
-						Ports: []kapi.EndpointPort{
-							{
-								Name: "north",
-								Port: 1234,
-							},
-							{
-								Name: "south",
-								Port: 4321,
-							},
-						},
-					},
-				},
-				expectedResult: true,
-			},
-			{
 				name: "invalid endpoint two few ports",
 				subsets: []kapi.EndpointSubset{
 					{
@@ -126,7 +105,7 @@ var _ = Describe("Util tests", func() {
 			test := kapi.Endpoints{
 				Subsets: tc.subsets,
 			}
-			Expect(validateOVNConfigEndpoint(&test)).To(Equal(tc.expectedResult), " test case \"%s\" returned %t instead of %t", tc.name, !tc.expectedResult, tc.expectedResult)
+			Expect(isValidOVNConfigEndpoint(&test)).To(Equal(tc.expectedResult), " test case \"%s\" returned %t instead of %t", tc.name, !tc.expectedResult, tc.expectedResult)
 		}
 	})
 
@@ -156,34 +135,7 @@ var _ = Describe("Util tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(nbDBPort).To(Equal(int32(1234)), " test case returned %t instead of 1234", nbDBPort)
 		Expect(sbDBPort).To(Equal(int32(4321)), " test case returned %t instead of 4321", sbDBPort)
-		Expect(masterIPList).To(Equal([]string{"10.1.2.3"}), " test case returned %t instead of []string{\"10.1.2.3\"}", masterIPList)
-
-		//valid endpoint, multiple IPs
-		subsets = []kapi.EndpointSubset{
-			{
-				Addresses: []kapi.EndpointAddress{
-					{IP: "10.1.2.3"}, {IP: "11.1.2.3"},
-				},
-				Ports: []kapi.EndpointPort{
-					{
-						Name: "north",
-						Port: 1234,
-					},
-					{
-						Name: "south",
-						Port: 4321,
-					},
-				},
-			},
-		}
-		test = kapi.Endpoints{
-			Subsets: subsets,
-		}
-		masterIPList, sbDBPort, nbDBPort, err = ExtractDbRemotesFromEndpoint(&test)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(nbDBPort).To(Equal(int32(1234)), " test case returned %t instead of 1234", nbDBPort)
-		Expect(sbDBPort).To(Equal(int32(4321)), " test case returned %t instead of 4321", sbDBPort)
-		Expect(masterIPList).To(Equal([]string{"10.1.2.3", "11.1.2.3"}), " test case returned %t instead of []string{\"10.1.2.3\", \"11.1.2.3\"}", masterIPList)
+		Expect(masterIPList).To(Equal("10.1.2.3"), " test case returned %t instead of \"10.1.2.3\"", masterIPList)
 
 		//invalid endpoint two few ports
 		subsets = []kapi.EndpointSubset{

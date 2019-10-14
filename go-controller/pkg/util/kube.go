@@ -70,14 +70,17 @@ func validateOVNConfigEndpoint(ep *kapi.Endpoints) bool {
 	return len(ep.Subsets) == 1 && len(ep.Subsets[0].Ports) == 2 && len(ep.Subsets[0].Addresses) > 0
 }
 
-// ExtractDbRemotesFromEndpoint extracts the DB endpoints
-func ExtractDbRemotesFromEndpoint(ep *kapi.Endpoints) ([]string, int32, int32, error) {
+func isValidOVNConfigEndpoint(ep *kapi.Endpoints) bool {
+	return len(ep.Subsets) == 1 && len(ep.Subsets[0].Ports) == 2 && len(ep.Subsets[0].Addresses) == 1
+}
+
+func ExtractDbRemotesFromEndpoint(ep *kapi.Endpoints) (string, int32, int32, error) {
 	var nbDBPort int32
 	var sbDBPort int32
-	var masterIPList []string
+	var masterIP string
 
-	if !validateOVNConfigEndpoint(ep) {
-		return masterIPList, nbDBPort, sbDBPort, fmt.Errorf("endpoint %s is not in the right format to configure OVN", ep.Name)
+	if !isValidOVNConfigEndpoint(ep) {
+		return "", nbDBPort, sbDBPort, fmt.Errorf("endpoint %v is not of the right format to configure OVN", ep)
 	}
 
 	for _, ovnDB := range ep.Subsets[0].Ports {
@@ -87,9 +90,8 @@ func ExtractDbRemotesFromEndpoint(ep *kapi.Endpoints) ([]string, int32, int32, e
 			nbDBPort = ovnDB.Port
 		}
 	}
-	for _, address := range ep.Subsets[0].Addresses {
-		masterIPList = append(masterIPList, address.IP)
-	}
 
-	return masterIPList, sbDBPort, nbDBPort, nil
+	masterIP = ep.Subsets[0].Addresses[0].IP
+
+	return masterIP, sbDBPort, nbDBPort, nil
 }

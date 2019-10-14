@@ -1217,31 +1217,15 @@ func (a *OvnAuthConfig) SetDBAuth() error {
 	return nil
 }
 
-func (a *OvnAuthConfig) updateIP(newIP []string, port string) error {
-	if a.Address != "" {
-		s := strings.Split(a.Address, ":")
-		if len(s) != 3 {
-			return fmt.Errorf("failed to parse OvnAuthConfig address %q", a.Address)
-		}
-		var newPort string
-		if port != "" {
-			newPort = port
-		} else {
-			newPort = s[2]
-		}
-
-		newAddresses := make([]string, 0, len(newIP))
-		for _, ipAddress := range newIP {
-			newAddresses = append(newAddresses, s[0]+":"+ipAddress+":"+newPort)
-		}
-		a.Address = strings.Join(newAddresses, ",")
-	}
+func (a *OvnAuthConfig) updateIP(newIP string, port string) error {
+	a.Address = string(OvnDBSchemeTCP) + ":" + newIP + ":" + port
+	a.Scheme = OvnDBSchemeTCP
 	return nil
 }
 
 // UpdateOVNNodeAuth updates the host and URL in ClientAuth
 // for both OvnNorth and OvnSouth. It updates them with the new masterIP.
-func UpdateOVNNodeAuth(masterIP []string, southboundDBPort, northboundDBPort string) error {
+func UpdateOVNNodeAuth(masterIP string, southboundDBPort, northboundDBPort string) error {
 	logrus.Debugf("Update OVN node auth with new master ip: %s", masterIP)
 	if err := OvnNorth.updateIP(masterIP, northboundDBPort); err != nil {
 		return fmt.Errorf("failed to update OvnNorth ClientAuth URL: %v", err)
