@@ -21,6 +21,7 @@ var callbacks = map[string]readinessFunc{
 	"ovn-nbctl":      ovnNbCtlReadiness,
 	"ovs-daemons":    ovsDaemonsReadiness,
 	"ovnkube-node":   ovnNodeReadiness,
+	"ovnkube-local":  ovnNodeReadiness,
 	"ovnnb-db-raft":  ovnNBDBRaftReadiness,
 	"ovnsb-db-raft":  ovnSBDBRaftReadiness,
 }
@@ -80,7 +81,7 @@ func ovnNBDBReadiness(target string) error {
 		return fmt.Errorf("%s is not ready: (%v)", target, err)
 	}
 
-	if strings.HasPrefix(output, "ptcp") || strings.HasPrefix(output, "pssl") {
+	if strings.HasPrefix(output, "ptcp") || strings.HasPrefix(output, "pssl") || output == "" {
 		return nil
 	}
 	return fmt.Errorf("%s is not setup for passive connection: %v", target, output)

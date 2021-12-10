@@ -559,9 +559,12 @@ install_ovn() {
   else
     run_kubectl apply -f ovnkube-db.yaml
   fi
+  kubectl label --overwrite node/ovn-worker k8s.ovn.org/ovnkube-az=local
+  kubectl label --overwrite node/ovn-worker2 k8s.ovn.org/ovnkube-az=local
   run_kubectl apply -f ovs-node.yaml
   run_kubectl apply -f ovnkube-master.yaml
   run_kubectl apply -f ovnkube-node.yaml
+  run_kubectl apply -f ovnkube-local.yaml
   popd
 }
 
