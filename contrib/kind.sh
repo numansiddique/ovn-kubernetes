@@ -562,6 +562,7 @@ install_ovn() {
   run_kubectl apply -f ovs-node.yaml
   run_kubectl apply -f ovnkube-master.yaml
   run_kubectl apply -f ovnkube-node.yaml
+  run_kubectl apply -f ovnkube-local.yaml
   popd
 }
 

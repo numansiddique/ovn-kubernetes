@@ -551,6 +551,10 @@ var CommonFlags = []cli.Flag{
 		Usage: "initialize node, requires the name that node is registered with in kubernetes cluster",
 	},
 	&cli.StringFlag{
+		Name:  "init-local",
+		Usage: "initialize local, requires the name that node is registered with in kubernetes cluster",
+	},
+	&cli.StringFlag{
 		Name:  "cleanup-node",
 		Usage: "cleanup node, requires the name that node is registered with in kubernetes cluster",
 	},

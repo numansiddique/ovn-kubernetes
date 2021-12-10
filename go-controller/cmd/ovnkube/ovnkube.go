@@ -198,6 +198,7 @@ func runOvnKube(ctx *cli.Context) error {
 
 	master := ctx.String("init-master")
 	node := ctx.String("init-node")
+	local := ctx.String("init-local")
 
 	cleanupNode := ctx.String("cleanup-node")
 	if cleanupNode != "" {
@@ -211,8 +212,8 @@ func runOvnKube(ctx *cli.Context) error {
 		return nil
 	}
 
-	if master == "" && node == "" {
-		return fmt.Errorf("need to run ovnkube in either master and/or node mode")
+	if master == "" && node == "" && local == "" {
+		return fmt.Errorf("need to run ovnkube in either master/node and/or local mode")
 	}
 
 	stopChan := make(chan struct{})
