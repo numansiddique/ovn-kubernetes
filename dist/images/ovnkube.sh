@@ -427,7 +427,7 @@ process_healthy() {
 check_health() {
   ctl_file=""
   case ${1} in
-  "ovnkube" | "ovnkube-master" | "ovn-dbchecker")
+  "ovnkube" | "ovnkube-master" | "ovn-dbchecker" | "ovnkube-local")
     # just check for presence of pid
     ;;
   "ovnnb_db" | "ovnsb_db")
@@ -842,6 +842,90 @@ run-ovn-northd() {
   exit 8
 }
 
+# v3 - run local_nb_ovsdb in a separate container
+local-nb-ovsdb() {
+  trap 'ovsdb_cleanup nb' TERM
+  check_ovn_daemonset_version "3"
+  rm -f ${OVN_RUNDIR}/ovnnb_db.pid
+
+  if [[ ${ovn_db_host} == "" ]]; then
+    echo "The IP address of the host $(hostname) could not be determined. Exiting..."
+    exit 1
+  fi
+
+  echo "=============== run local_nb_ovsdb =========="
+  run_as_ovs_user_if_needed \
+    ${OVNCTL_PATH} run_nb_ovsdb --no-monitor \
+    --ovn-nb-log="${ovn_loglevel_nb}" &
+
+  wait_for_event attempts=3 process_ready ovnnb_db
+  echo "=============== local-nb-ovsdb ========== RUNNING"
+
+  tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
+  ovn_tail_pid=$!
+
+  process_healthy ovnnb_db ${ovn_tail_pid}
+  echo "=============== run local_nb_ovsdb ========== terminated"
+}
+
+# v3 - run local_sb_ovsdb in a separate container
+local-sb-ovsdb() {
+  trap 'ovsdb_cleanup sb' TERM
+  check_ovn_daemonset_version "3"
+  rm -f ${OVN_RUNDIR}/ovnsb_db.pid
+
+  if [[ ${ovn_db_host} == "" ]]; then
+    echo "The IP address of the host $(hostname) could not be determined. Exiting..."
+    exit 1
+  fi
+
+  echo "=============== run local_sb_ovsdb ========== "
+  run_as_ovs_user_if_needed \
+    ${OVNCTL_PATH} run_sb_ovsdb --no-monitor \
+    --ovn-sb-log="${ovn_loglevel_sb}" &
+
+  wait_for_event attempts=3 process_ready ovnsb_db
+  echo "=============== local-sb-ovsdb ========== RUNNING"
+
+  tail --follow=name ${OVN_LOGDIR}/ovsdb-server-sb.log &
+  ovn_tail_pid=$!
+
+  process_healthy ovnsb_db ${ovn_tail_pid}
+  echo "=============== run local_sb_ovsdb ========== terminated"
+}
+
+# v3 - Runs northd on ovnkube-local. Does not run nb_ovsdb, and sb_ovsdb
+run-local-ovn-northd() {
+  trap 'ovs-appctl -t ovn-northd exit >/dev/null 2>&1; exit 0' TERM
+  check_ovn_daemonset_version "3"
+  rm -f ${OVN_RUNDIR}/ovn-northd.pid
+  rm -f ${OVN_RUNDIR}/ovn-northd.*.ctl
+
+  echo "=============== run-local-ovn-northd (wait for ready_to_start_node)"
+  wait_for_event ready_to_start_node
+
+  echo "=============== run_local_ovn_northd ========== LOCAL"
+  echo "ovn_northd_opts=${ovn_northd_opts}"
+  echo "ovn_loglevel_northd=${ovn_loglevel_northd}"
+
+  # no monitor (and no detach), start northd which connects to the
+  # ovnkube-db service
+  run_as_ovs_user_if_needed \
+    ${OVNCTL_PATH} start_northd \
+    --no-monitor --ovn-manage-ovsdb=no \
+    --ovn-northd-log="${ovn_loglevel_northd}" \
+    ${ovn_northd_opts}
+
+  wait_for_event attempts=3 process_ready ovn-northd
+  echo "=============== run_local_ovn_northd ========== RUNNING"
+
+  tail --follow=name ${OVN_LOGDIR}/ovn-northd.log &
+  ovn_tail_pid=$!
+
+  process_healthy ovn-northd ${ovn_tail_pid}
+  exit 8
+}
+
 # v3 - run ovnkube --master
 ovn-master() {
   trap 'kill $(jobs -p); exit 0' TERM
@@ -1207,6 +1291,223 @@ ovn-node() {
   exit 7
 }
 
+# v3 - run ovnkube --local
+ovn-local() {
+  trap 'kill $(jobs -p); exit 0' TERM
+  check_ovn_daemonset_version "3"
+  rm -f ${OVN_RUNDIR}/ovnkube-master.pid
+
+  echo "=============== ovn-local (wait for ready_to_start_node) ========== "
+  wait_for_event ready_to_start_node
+
+  # wait for northd to start
+  wait_for_event process_ready ovn-northd
+
+  echo "=============== ovn-local (wait for ovn-nbctl daemon) ========== local node"
+  wait_for_event process_ready ovn-nbctl
+
+  # wait for ovs-servers to start since ovn-master sets some fields in OVS DB
+  echo "=============== ovn-local - (wait for ovs)"
+  wait_for_event ovs_ready
+
+  wait_for_event process_ready ovn-controller
+
+  hybrid_overlay_flags=
+  if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
+    hybrid_overlay_flags="--enable-hybrid-overlay"
+    if [[ -n "${ovn_hybrid_overlay_net_cidr}" ]]; then
+      hybrid_overlay_flags="${hybrid_overlay_flags} --hybrid-overlay-cluster-subnets=${ovn_hybrid_overlay_net_cidr}"
+    fi
+  fi
+  disable_snat_multiple_gws_flag=
+  if [[ ${ovn_disable_snat_multiple_gws} == "true" ]]; then
+      disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
+  fi
+
+  disable_pkt_mtu_check_flag=
+  if [[ ${ovn_disable_pkt_mtu_check} == "true" ]]; then
+      disable_pkt_mtu_check_flag="--disable-pkt-mtu-check"
+  fi
+
+  empty_lb_events_flag=
+  if [[ ${ovn_empty_lb_events} == "true" ]]; then
+      empty_lb_events_flag="--ovn-empty-lb-events"
+  fi
+
+  ovn_v4_join_subnet_opt=
+  if [[ -n ${ovn_v4_join_subnet} ]]; then
+      ovn_v4_join_subnet_opt="--gateway-v4-join-subnet=${ovn_v4_join_subnet}"
+  fi
+  
+  ovn_v6_join_subnet_opt=
+  if [[ -n ${ovn_v6_join_subnet} ]]; then
+      ovn_v6_join_subnet_opt="--gateway-v6-join-subnet=${ovn_v6_join_subnet}"
+  fi
+
+  ovn_routable_mtu_flag=
+  if [[ -n "${routable_mtu}" ]]; then
+      routable_mtu_flag="--routable-mtu ${routable_mtu}"
+  fi
+
+  disable_ovn_iface_id_ver_flag=
+  if [[ ${ovn_disable_ovn_iface_id_ver} == "true" ]]; then
+      disable_ovn_iface_id_ver_flag="--disable-ovn-iface-id-ver"
+  fi
+
+
+  local ovn_master_ssl_opts=""
+  [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+    ovn_master_ssl_opts="
+        --nb-client-privkey ${ovn_controller_pk}
+        --nb-client-cert ${ovn_controller_cert}
+        --nb-client-cacert ${ovn_ca_cert}
+        --nb-cert-common-name ${ovn_controller_cname}
+        --sb-client-privkey ${ovn_controller_pk}
+        --sb-client-cert ${ovn_controller_cert}
+        --sb-client-cacert ${ovn_ca_cert}
+        --sb-cert-common-name ${ovn_controller_cname}
+      "
+  }
+
+  ovn_acl_logging_rate_limit_flag=
+  if [[ -n ${ovn_acl_logging_rate_limit} ]]; then
+      ovn_acl_logging_rate_limit_flag="--acl-logging-rate-limit ${ovn_acl_logging_rate_limit}"
+  fi
+
+  multicast_enabled_flag=
+  if [[ ${ovn_multicast_enable} == "true" ]]; then
+      multicast_enabled_flag="--enable-multicast"
+  fi
+
+  egressip_enabled_flag=
+  if [[ ${ovn_egressip_enable} == "true" ]]; then
+      egressip_enabled_flag="--enable-egress-ip"
+  fi
+  egressfirewall_enabled_flag=
+  if [[ ${ovn_egressfirewall_enable} == "true" ]]; then
+	  egressfirewall_enabled_flag="--enable-egress-firewall"
+  fi
+  echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
+
+  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
+
+  netflow_targets=
+  if [[ -n ${ovn_netflow_targets} ]]; then
+      netflow_targets="--netflow-targets ${ovn_netflow_targets}"
+  fi
+
+  sflow_targets=
+  if [[ -n ${ovn_sflow_targets} ]]; then
+      sflow_targets="--sflow-targets ${ovn_sflow_targets}"
+  fi
+
+  ipfix_targets=
+  if [[ -n ${ovn_ipfix_targets} ]]; then
+      ipfix_targets="--ipfix-targets ${ovn_ipfix_targets}"
+  fi
+
+  monitor_all=
+  if [[ -n ${ovn_monitor_all} ]]; then
+     monitor_all="--monitor-all=${ovn_monitor_all}"
+  fi
+
+  enable_lflow_cache=
+  if [[ -n ${ovn_enable_lflow_cache} ]]; then
+     enable_lflow_cache="--enable-lflow-cache=${ovn_enable_lflow_cache}"
+  fi
+
+  lflow_cache_limit=
+  if [[ -n ${ovn_lflow_cache_limit} ]]; then
+     lflow_cache_limit="--lflow-cache-limit=${ovn_lflow_cache_limit}"
+  fi
+
+  lflow_cache_limit_kb=
+  if [[ -n ${ovn_lflow_cache_limit_kb} ]]; then
+     lflow_cache_limit_kb="--lflow-cache-limit-kb=${ovn_lflow_cache_limit_kb}"
+  fi
+
+  egress_interface=
+  if [[ -n ${ovn_ex_gw_network_interface} ]]; then
+      egress_interface="--exgw-interface ${ovn_ex_gw_network_interface}"
+  fi
+
+  ovn_encap_ip_flag=
+  if [[ ${ovn_encap_ip} != "" ]]; then
+    ovn_encap_ip_flag="--encap-ip=${ovn_encap_ip}"
+  else
+    ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip)
+    if [[ $? == 0 ]]; then
+      ovn_encap_ip=$(echo ${ovn_encap_ip} | tr -d '\"')
+      if [[ "${ovn_encap_ip}" != "" ]]; then
+        ovn_encap_ip_flag="--encap-ip=${ovn_encap_ip}"
+      fi
+    fi
+  fi
+
+  ovnkube_node_mgmt_port_netdev_flag=
+  if [[ ${ovnkube_node_mgmt_port_netdev} != "" ]]; then
+    ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-netdev=${ovnkube_node_mgmt_port_netdev}"
+  fi
+
+  ovn_unprivileged_flag="--unprivileged-mode"
+  if test -z "${OVN_UNPRIVILEGED_MODE+x}" -o "x${OVN_UNPRIVILEGED_MODE}" = xno; then
+    ovn_unprivileged_flag=""
+  fi
+
+  ovn_metrics_bind_address="${metrics_endpoint_ip}:9476"
+  ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
+
+
+  echo "=============== ovn-local --init-local"
+  /usr/bin/ovnkube \
+    --init-local ${K8S_NODE} \
+    --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
+    --gateway-mode=${ovn_gateway_mode} \
+    --gateway-router-subnet=${ovn_gateway_router_subnet} \
+    --pidfile ${OVN_RUNDIR}/ovnkube-local.pid \
+    --logfile /var/log/ovn-kubernetes/ovnkube-local.log \
+    --nbctl-daemon-mode \
+    --loglevel=${ovnkube_loglevel} \
+    --logfile-maxsize=${ovnkube_logfile_maxsize} \
+    --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
+    --logfile-maxage=${ovnkube_logfile_maxage} \
+    ${hybrid_overlay_flags} \
+    ${disable_snat_multiple_gws_flag} \
+    ${empty_lb_events_flag} \
+    ${ovn_v4_join_subnet_opt} \
+    ${ovn_v6_join_subnet_opt} \
+    --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
+    --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
+    ${ovn_master_ssl_opts} \
+    ${multicast_enabled_flag} \
+    ${ovn_acl_logging_rate_limit_flag} \
+    ${egressip_enabled_flag} \
+    ${egressfirewall_enabled_flag} \
+    --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
+    --host-network-namespace ${ovn_host_network_namespace} \
+    ${monitor_all} \
+    ${enable_lflow_cache} \
+    ${lflow_cache_limit} \
+    ${lflow_cache_limit_kb} \
+    ${multicast_enabled_flag} \
+    ${egressip_enabled_flag} \
+    ${disable_ovn_iface_id_ver_flag} \
+    ${netflow_targets} \
+    ${sflow_targets} \
+    ${ipfix_targets} \
+    --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
+    --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
+     ${ovnkube_node_mode_flag} \
+    ${egress_interface} \
+    ${ovnkube_node_mgmt_port_netdev_flag} &
+
+  echo "=============== ovn-local ========== running"
+  wait_for_event attempts=3 process_ready ovnkube-local
+
+  process_healthy ovnkube-local
+  exit 9
+}
+
 # cleanup-ovn-node - all nodes
 cleanup-ovn-node() {
   check_ovn_daemonset_version "3"
@@ -1259,6 +1560,31 @@ run-nbctld() {
   echo "=============== run_ovn_nbctl ========== terminated"
 }
 
+# v3 - Runs ovn-nbctl in daemon mode
+run-local-nbctld() {
+  trap 'ovs-appctl -t ovn-nbctl exit >/dev/null 2>&1; exit 0' TERM
+  check_ovn_daemonset_version "3"
+  rm -f ${OVN_RUNDIR}/ovn-nbctl.pid
+  rm -f ${OVN_RUNDIR}/ovn-nbctl.*.ctl
+
+  echo "=============== run-nbctld - (wait for ready_to_start_node)"
+  wait_for_event ready_to_start_node
+
+  echo "ovn_loglevel_nbctld=${ovn_loglevel_nbctld}"
+
+  /usr/bin/ovn-nbctl ${ovn_loglevel_nbctld} --pidfile  \
+    --log-file=${OVN_LOGDIR}/ovn-nbctl.log --detach ${ovndb_ctl_ssl_opts}
+
+  wait_for_event attempts=3 process_ready ovn-nbctl
+  echo "=============== run_local_ovn_nbctl ========== RUNNING"
+
+  tail --follow=name ${OVN_LOGDIR}/ovn-nbctl.log &
+  nbctl_tail_pid=$!
+
+  process_healthy ovn-nbctl ${nbctl_tail_pid}
+  echo "=============== run_local_ovn_nbctl ========== terminated"
+}
+
 # v3 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVS.
 ovs-metrics() {
   check_ovn_daemonset_version "3"
@@ -1300,14 +1626,23 @@ case ${cmd} in
 "nb-ovsdb") # pod ovnkube-db container nb-ovsdb
   nb-ovsdb
   ;;
+"local-nb-ovsdb")
+  local-nb-ovsdb
+  ;;
 "sb-ovsdb") # pod ovnkube-db container sb-ovsdb
   sb-ovsdb
+  ;;
+"local-sb-ovsdb")
+  local-sb-ovsdb
   ;;
 "ovn-dbchecker") # pod ovnkube-db container ovn-dbchecker
   ovn-dbchecker
   ;;
 "run-ovn-northd") # pod ovnkube-master container run-ovn-northd
   run-ovn-northd
+  ;;
+"run-local-ovn-northd")
+  run-local-ovn-northd
   ;;
 "ovn-master") # pod ovnkube-master container ovnkube-master
   ovn-master
@@ -1321,8 +1656,14 @@ case ${cmd} in
 "ovn-node") # pod ovnkube-node container ovn-node
   ovn-node
   ;;
+"ovn-local")
+  ovn-local
+  ;;
 "run-nbctld") # pod ovnkube-master container run-nbctld
   run-nbctld
+  ;;
+"run-local-nbctld")
+  run-local-nbctld
   ;;
 "ovn-northd")
   ovn-northd
