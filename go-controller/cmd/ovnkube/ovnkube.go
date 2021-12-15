@@ -200,6 +200,11 @@ func runOvnKube(ctx *cli.Context) error {
 	node := ctx.String("init-node")
 	local := ctx.String("init-local")
 
+	if local != "" {
+		master = local
+		node = local
+	}
+
 	cleanupNode := ctx.String("cleanup-node")
 	if cleanupNode != "" {
 		if master != "" || node != "" {

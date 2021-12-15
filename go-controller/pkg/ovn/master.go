@@ -1102,9 +1102,11 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 		}
 	}()
 	// Ensure that the node's logical network has been created
-	err = oc.ensureNodeLogicalNetwork(node, hostSubnets)
-	if err != nil {
-		return nil, err
+	if util.IsNodeGlobalAZ(node) {
+		err = oc.ensureNodeLogicalNetwork(node, hostSubnets)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Set the HostSubnet annotation on the node object to signal
@@ -1151,6 +1153,7 @@ func (oc *Controller) checkNodeChassisMismatch(node *kapi.Node) (bool, error) {
 			return false, nil
 		}
 	}
+
 	return true, nil
 }
 
@@ -1167,6 +1170,15 @@ func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) {
 				"Node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB",
 				node.Name)
 			klog.Errorf("Node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB", node.Name)
+		}
+	} else if !util.IsNodeGlobalAZ(node) {
+		klog.V(5).Infof("Node %s is not part of global Availability zone, delete its chassis in SBDB", node.Name)
+		if err = libovsdbops.DeleteNodeChassis(oc.sbClient, node.Name); err != nil {
+			// Send an event and Log on failure
+			oc.recorder.Eventf(node, kapi.EventTypeWarning, "ErrorMismatchChassis",
+				"Node %s is not part of global Availability zone. Its chassis entry is still in the SBDB",
+				node.Name)
+			klog.Errorf("Node %s is not part of global Availability zone. Its chassis entry is still in the SBDB", node.Name)
 		}
 	}
 }
@@ -1221,18 +1233,7 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) {
-	// Clean up as much as we can but don't hard error
-	for _, hostSubnet := range hostSubnets {
-		if err := oc.deleteNodeHostSubnet(nodeName, hostSubnet); err != nil {
-			klog.Errorf("Error deleting node %s HostSubnet %v: %v", nodeName, hostSubnet, err)
-		} else {
-			util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, false)
-		}
-	}
-	// update metrics
-	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
-
+func (oc *Controller) deleteNodeOvnResources(nodeName string) {
 	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
 		klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
 	}
@@ -1248,6 +1249,21 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) {
 	if err := libovsdbops.DeleteNodeChassis(oc.sbClient, nodeName); err != nil {
 		klog.Errorf("Failed to remove the chassis associated with node %s in the OVN SB Chassis table: %v", nodeName, err)
 	}
+}
+
+func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) {
+	// Clean up as much as we can but don't hard error
+	for _, hostSubnet := range hostSubnets {
+		if err := oc.deleteNodeHostSubnet(nodeName, hostSubnet); err != nil {
+			klog.Errorf("Error deleting node %s HostSubnet %v: %v", nodeName, hostSubnet, err)
+		} else {
+			util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, false)
+		}
+	}
+	// update metrics
+	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
+
+	oc.deleteNodeOvnResources(nodeName)
 }
 
 // OVN uses an overlay and doesn't need GCE Routes, we need to

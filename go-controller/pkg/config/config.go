@@ -1857,6 +1857,11 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 			return nil, fmt.Errorf("certificate or key given; perhaps you mean to use the 'ssl' scheme?")
 		}
 		auth.Scheme = OvnDBSchemeUnix
+		if northbound {
+			auth.Address = "unix:/var/run/ovn/ovnnb_db.sock"
+		} else {
+			auth.Address = "unix:/var/run/ovn/ovnsb_db.sock"
+		}
 		return auth, nil
 	}
 

@@ -67,6 +67,8 @@ const (
 	// capacity for each node. It is set by
 	// openshift/cloud-network-config-controller
 	cloudEgressIPConfigAnnotationKey = "cloud.network.openshift.io/egress-ipconfig"
+
+	ovnNodeLocalAZ = "k8s.ovn.org/local-ovn-az"
 )
 
 type L3GatewayConfig struct {
@@ -463,4 +465,17 @@ func ParseNodeHostAddresses(node *kapi.Node) (sets.String, error) {
 	}
 
 	return sets.NewString(cfg...), nil
+}
+
+func IsNodeLocalAZ(node *kapi.Node) bool {
+	IsNodeLocalAZ, ok := node.Annotations[ovnNodeLocalAZ]
+	if !ok {
+		return false
+	}
+
+	return IsNodeLocalAZ == "true"
+}
+
+func IsNodeGlobalAZ(node *kapi.Node) bool {
+	return !IsNodeLocalAZ(node)
 }
