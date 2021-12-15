@@ -1114,38 +1114,39 @@ func (oc *Controller) WatchNodes() {
 				return
 			}
 
-			if err = oc.syncNodeClusterRouterPort(node, hostSubnets); err != nil {
-				if !util.IsAnnotationNotSetError(err) {
-					klog.Warningf(err.Error())
+			if util.IsNodeGlobalAZ(node) {
+				if err = oc.syncNodeClusterRouterPort(node, hostSubnets); err != nil {
+					if !util.IsAnnotationNotSetError(err) {
+						klog.Warningf(err.Error())
+					}
+					nodeClusterRouterPortFailed.Store(node.Name, true)
 				}
-				nodeClusterRouterPortFailed.Store(node.Name, true)
-			}
 
-			err = oc.syncNodeManagementPort(node, hostSubnets)
-			if err != nil {
-				if !util.IsAnnotationNotSetError(err) {
-					klog.Warningf("Error creating management port for node %s: %v", node.Name, err)
+				err = oc.syncNodeManagementPort(node, hostSubnets)
+				if err != nil {
+					if !util.IsAnnotationNotSetError(err) {
+						klog.Warningf("Error creating management port for node %s: %v", node.Name, err)
+					}
+					mgmtPortFailed.Store(node.Name, true)
 				}
-				mgmtPortFailed.Store(node.Name, true)
-			}
 
-			if err := oc.syncNodeGateway(node, hostSubnets); err != nil {
-				if !util.IsAnnotationNotSetError(err) {
-					klog.Warningf(err.Error())
+				if err := oc.syncNodeGateway(node, hostSubnets); err != nil {
+					if !util.IsAnnotationNotSetError(err) {
+						klog.Warningf(err.Error())
+					}
+					gatewaysFailed.Store(node.Name, true)
 				}
-				gatewaysFailed.Store(node.Name, true)
-			}
 
-			// ensure pods that already exist on this node have their logical ports created
-			options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
-			pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
-			if err != nil {
-				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
-			} else {
-				oc.addRetryPods(pods.Items)
-				oc.requestRetryPods()
+				// ensure pods that already exist on this node have their logical ports created
+				options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
+				pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
+				if err != nil {
+					klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
+				} else {
+					oc.addRetryPods(pods.Items)
+					oc.requestRetryPods()
+				}
 			}
-
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
@@ -1160,9 +1161,11 @@ func (oc *Controller) WatchNodes() {
 				return
 			}
 
+			nodeAddedtoGlobalAZ := util.IsNodeGlobalAZ(node) && !util.IsNodeGlobalAZ(oldNode)
+
 			var hostSubnets []*net.IPNet
 			_, failed := addNodeFailed.Load(node.Name)
-			if failed {
+			if failed || nodeAddedtoGlobalAZ {
 				hostSubnets, err = oc.addNode(node)
 				if err != nil {
 					klog.Errorf("NodeUpdate: error creating subnet for node %s: %v", node.Name, err)
@@ -1171,49 +1174,54 @@ func (oc *Controller) WatchNodes() {
 				addNodeFailed.Delete(node.Name)
 			}
 
-			_, failed = nodeClusterRouterPortFailed.Load(node.Name)
-			if failed || nodeChassisChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
-				if err = oc.syncNodeClusterRouterPort(node, nil); err != nil {
-					if !util.IsAnnotationNotSetError(err) {
-						klog.Warningf(err.Error())
+			if util.IsNodeGlobalAZ(node) {
+				_, failed = nodeClusterRouterPortFailed.Load(node.Name)
+				if failed || nodeChassisChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) || nodeAddedtoGlobalAZ {
+					if err = oc.syncNodeClusterRouterPort(node, nil); err != nil {
+						if !util.IsAnnotationNotSetError(err) {
+							klog.Warningf(err.Error())
+						}
+						nodeClusterRouterPortFailed.Store(node.Name, true)
+					} else {
+						nodeClusterRouterPortFailed.Delete(node.Name)
 					}
-					nodeClusterRouterPortFailed.Store(node.Name, true)
-				} else {
-					nodeClusterRouterPortFailed.Delete(node.Name)
 				}
-			}
 
-			_, failed = mgmtPortFailed.Load(node.Name)
-			if failed || macAddressChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
-				err := oc.syncNodeManagementPort(node, hostSubnets)
-				if err != nil {
-					if !util.IsAnnotationNotSetError(err) {
-						klog.Errorf("Error updating management port for node %s: %v", node.Name, err)
+				_, failed = mgmtPortFailed.Load(node.Name)
+				if failed || macAddressChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) || nodeAddedtoGlobalAZ {
+					err := oc.syncNodeManagementPort(node, hostSubnets)
+					if err != nil {
+						if !util.IsAnnotationNotSetError(err) {
+							klog.Errorf("Error updating management port for node %s: %v", node.Name, err)
+						}
+						mgmtPortFailed.Store(node.Name, true)
+					} else {
+						mgmtPortFailed.Delete(node.Name)
 					}
-					mgmtPortFailed.Store(node.Name, true)
-				} else {
-					mgmtPortFailed.Delete(node.Name)
 				}
-			}
 
-			if nodeChassisChanged(oldNode, node) {
-				// delete stale chassis in SBDB if any
+				if nodeChassisChanged(oldNode, node) {
+					// delete stale chassis in SBDB if any
+					oc.deleteStaleNodeChassis(node)
+				}
+
+				oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
+
+				_, failed = gatewaysFailed.Load(node.Name)
+				if failed || gatewayChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) || hostAddressesChanged(oldNode, node) || nodeAddedtoGlobalAZ {
+					err := oc.syncNodeGateway(node, nil)
+					if err != nil {
+						if !util.IsAnnotationNotSetError(err) {
+							klog.Errorf(err.Error())
+						}
+						gatewaysFailed.Store(node.Name, true)
+					} else {
+						gatewaysFailed.Delete(node.Name)
+					}
+				}
+			} else if util.IsNodeGlobalAZ(oldNode) {
+				oc.deleteNodeOvnResources(node.Name)
 				oc.deleteStaleNodeChassis(node)
-			}
-
-			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
-
-			_, failed = gatewaysFailed.Load(node.Name)
-			if failed || gatewayChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) || hostAddressesChanged(oldNode, node) {
-				err := oc.syncNodeGateway(node, nil)
-				if err != nil {
-					if !util.IsAnnotationNotSetError(err) {
-						klog.Errorf(err.Error())
-					}
-					gatewaysFailed.Store(node.Name, true)
-				} else {
-					gatewaysFailed.Delete(node.Name)
-				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {

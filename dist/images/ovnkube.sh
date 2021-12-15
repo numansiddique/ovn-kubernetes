@@ -1295,7 +1295,7 @@ ovn-node() {
 ovn-local() {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
-  rm -f ${OVN_RUNDIR}/ovnkube-master.pid
+  rm -f ${OVN_RUNDIR}/ovnkube-local.pid
 
   echo "=============== ovn-local (wait for ready_to_start_node) ========== "
   wait_for_event ready_to_start_node
@@ -1476,8 +1476,6 @@ ovn-local() {
     ${empty_lb_events_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
-    --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
-    --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
     ${multicast_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
