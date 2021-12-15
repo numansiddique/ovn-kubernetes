@@ -1923,7 +1923,12 @@ func (a *OvnAuthConfig) GetURL() string {
 // for the OVN northbound or southbound database server or client
 func (a *OvnAuthConfig) SetDBAuth() error {
 	if a.Scheme == OvnDBSchemeUnix {
-		// Nothing to do
+		if !a.northbound {
+			// store the Southbound Database address in an external id - "external_ids:ovn-remote"
+			if err := setOVSExternalID(a.exec, "ovn-remote", "unix:/var/run/ovn/ovnsb_db.sock"); err != nil {
+				return err
+			}
+		}
 		return nil
 	} else if a.Scheme == OvnDBSchemeSSL {
 		// Both server and client SSL schemes require privkey and cert
