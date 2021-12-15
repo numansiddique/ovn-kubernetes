@@ -479,3 +479,7 @@ func IsNodeLocalAZ(node *kapi.Node) bool {
 func IsNodeGlobalAZ(node *kapi.Node) bool {
 	return !IsNodeLocalAZ(node)
 }
+
+func SetNodeLocalAZ(nodeAnnotator kube.Annotator, local bool) error {
+	return nodeAnnotator.Set(ovnNodeLocalAZ, strconv.FormatBool(local))
+}

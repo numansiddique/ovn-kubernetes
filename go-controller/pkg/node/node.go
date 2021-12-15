@@ -45,10 +45,11 @@ type OvnNode struct {
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
 	gateway      Gateway
+	localAZ      bool
 }
 
 // NewNode creates a new controller for node management
-func NewNode(kubeClient kubernetes.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
+func NewNode(kubeClient kubernetes.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder, localAZ bool) *OvnNode {
 	return &OvnNode{
 		name:         name,
 		client:       kubeClient,
@@ -56,6 +57,7 @@ func NewNode(kubeClient kubernetes.Interface, wf factory.NodeWatchFactory, name 
 		watchFactory: wf,
 		stopChan:     stopChan,
 		recorder:     eventRecorder,
+		localAZ:      localAZ,
 	}
 }
 
@@ -335,6 +337,14 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}
 	}
 
+	// Set the node Annotations to indicate that this node belongs to the global Availabiltiy Zone
+	// or the local Availability Zone.
+	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node.Name)
+	util.SetNodeLocalAZ(nodeAnnotator, n.localAZ)
+	if err := nodeAnnotator.Run(); err != nil {
+		return fmt.Errorf("failed to set node %s annotations: %v", n.name, err)
+	}
+
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
 	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
 		if node, err = n.Kube.GetNode(n.name); err != nil {
@@ -374,7 +384,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 
 	// Setup Management port and gateway
 	mgmtPort = NewManagementPort(n.name, subnets)
-	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node.Name)
 	waiter := newStartupWaiter()
 
 	mgmtPortConfig, err = mgmtPort.Create(nodeAnnotator, waiter)
