@@ -70,6 +70,7 @@ const (
 	cloudEgressIPConfigAnnotationKey = "cloud.network.openshift.io/egress-ipconfig"
 
 	ovnNodeAzName = "k8s.ovn.org/ovn-az-name"
+	OvnNodeId     = "k8s.ovn.org/ovn-node-id"
 )
 
 type L3GatewayConfig struct {
@@ -477,4 +478,21 @@ func IsNodeGlobalAz(node *kapi.Node) bool {
 
 func SetNodeAzName(nodeAnnotator kube.Annotator, azName string) error {
 	return nodeAnnotator.Set(ovnNodeAzName, azName)
+}
+
+func GetNodeId(node *kapi.Node) int {
+	azId, ok := node.Annotations[OvnNodeId]
+	if !ok {
+		return -1
+	}
+
+	id, err := strconv.Atoi(azId)
+	if err != nil {
+		return -1
+	}
+	return id
+}
+
+func SetNodeId(nodeAnnotator kube.Annotator, id int) error {
+	return nodeAnnotator.Set(OvnNodeId, strconv.Itoa(id))
 }
