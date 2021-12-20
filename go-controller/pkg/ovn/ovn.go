@@ -26,6 +26,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
+	bitmapallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator/allocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
@@ -203,6 +204,8 @@ type Controller struct {
 	retryPodsChan chan struct{}
 
 	metricsRecorder *metrics.ControlPlaneRecorder
+
+	azIdBitmap *bitmapallocator.AllocationBitmap
 }
 
 type retryEntry struct {
@@ -248,6 +251,8 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 	}
 	modelClient := libovsdbops.NewModelClient(libovsdbOvnNBClient)
 	svcController, svcFactory := newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient)
+	azIdBitmap := bitmapallocator.NewContiguousAllocationMap(5000, "az")
+	azIdBitmap.Allocate(0)
 	return &Controller{
 		client: ovnClient.KubeClient,
 		kube: &kube.Kube{
@@ -294,6 +299,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		svcFactory:               svcFactory,
 		modelClient:              modelClient,
 		metricsRecorder:          metrics.NewControlPlaneRecorder(libovsdbOvnSBClient),
+		azIdBitmap:               azIdBitmap,
 	}
 }
 
@@ -1176,6 +1182,7 @@ func (oc *Controller) WatchNodes() {
 					oc.requestRetryPods()
 				}
 			}
+			oc.syncNodeAzId(node, false)
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
@@ -1252,6 +1259,7 @@ func (oc *Controller) WatchNodes() {
 				oc.deleteNodeOvnResources(node.Name)
 				oc.deleteStaleNodeChassis(node)
 			}
+			oc.syncNodeAzId(node, false)
 		},
 		DeleteFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
@@ -1265,6 +1273,7 @@ func (oc *Controller) WatchNodes() {
 			mgmtPortFailed.Delete(node.Name)
 			gatewaysFailed.Delete(node.Name)
 			nodeClusterRouterPortFailed.Delete(node.Name)
+			oc.syncNodeAzId(node, true)
 		},
 	}, oc.syncNodes)
 	klog.Infof("Bootstrapping existing nodes and cleaning stale nodes took %v", time.Since(start))
