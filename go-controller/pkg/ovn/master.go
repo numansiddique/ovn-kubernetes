@@ -1367,6 +1367,7 @@ func (oc *Controller) syncNodesPeriodic() {
 // do not want to delete.
 func (oc *Controller) syncNodes(nodes []interface{}) {
 	foundNodes := sets.NewString()
+
 	for _, tmp := range nodes {
 		node, ok := tmp.(*kapi.Node)
 		if !ok {
@@ -1389,6 +1390,13 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		_, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
 		if err != nil {
 			klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
+		}
+
+		if !oc.local {
+			nodeAzId := util.GetNodeLocalAZId(node)
+			if nodeAzId != -1 {
+				oc.azIdBitmap.Allocate(int(nodeAzId))
+			}
 		}
 	}
 	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
@@ -1453,4 +1461,26 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		klog.Errorf("Failed Deleting chassis %v error: %v", staleChassis.List(), err)
 		return
 	}
+}
+
+func (oc *Controller) syncNodeAzId(node *kapi.Node, deleted bool) error {
+	if oc.local {
+		return nil
+	}
+	klog.Infof("syncNodeAzId entered for node %q", node.Name)
+	nodeAzId := util.GetNodeLocalAZId(node)
+	klog.Infof("syncNodeAz Id for node %q is %d", node.Name, nodeAzId)
+
+	if nodeAzId == -1 {
+		id, allocated, _ := oc.azIdBitmap.AllocateNext()
+		klog.Infof("syncNodeAz Id allocated for node %q is %d", node.Name, id)
+		if allocated {
+			klog.Infof("syncNodeAz : Setting Id  for node %q in annotations", node.Name)
+			oc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{"k8s.ovn.org/local-ovn-az-id": strconv.Itoa(id)})
+		}
+	} else if deleted {
+		oc.azIdBitmap.Release(nodeAzId)
+	}
+
+	return nil
 }
