@@ -201,7 +201,6 @@ func runOvnKube(ctx *cli.Context) error {
 	local := ctx.String("init-local")
 
 	if local != "" {
-		master = local
 		node = local
 	}
 
@@ -221,12 +220,16 @@ func runOvnKube(ctx *cli.Context) error {
 		return fmt.Errorf("need to run ovnkube in either master/node and/or local mode")
 	}
 
+	if master != "" && local != "" {
+		return fmt.Errorf("need to run ovnkube in either master or local mode")
+	}
+
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
 
 	var watchFactory factory.Shutdownable
 	var masterWatchFactory *factory.WatchFactory
-	if master != "" {
+	if master != "" || local != "" {
 		var err error
 		// create factory and start the controllers asked for
 		masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset)
@@ -249,10 +252,22 @@ func runOvnKube(ctx *cli.Context) error {
 		// since we capture some metrics in Start()
 		metrics.RegisterMasterMetrics(libovsdbOvnSBClient)
 
-		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
-			libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient))
-		if err := ovnController.Start(master, wg, ctx.Context); err != nil {
-			return err
+		if master != "" {
+			ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
+				libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient), false, master)
+			if err := ovnController.Start(master, wg, ctx.Context); err != nil {
+				return err
+			}
+		}
+
+		if local != "" {
+			klog.Infof("Nums DUDE : Creating local OvnController in node : %q", node)
+			localController := ovn.NewLocalOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
+				libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient), local)
+			if err := localController.Start(wg); err != nil {
+				return err
+			}
+			klog.Infof("Nums : local OvnController start() returned for : %q", node)
 		}
 	}
 
