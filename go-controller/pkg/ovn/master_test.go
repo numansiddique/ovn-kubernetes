@@ -978,7 +978,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(0), false, "master")
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 
@@ -1166,7 +1166,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(0), false, "master")
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 
@@ -1461,7 +1461,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(0), false, "master")
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 
 			// configure the cluster allocators

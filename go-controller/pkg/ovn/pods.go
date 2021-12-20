@@ -36,7 +36,8 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			continue
 		}
 		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations)
-		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && err == nil {
+		checkLogicalPort := !oc.local || pod.Spec.NodeName == oc.nodeName
+		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && err == nil && checkLogicalPort {
 			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 			expectedLogicalPorts[logicalPort] = true
 			if err = oc.waitForNodeLogicalSwitchInCache(pod.Spec.NodeName); err != nil {
@@ -65,11 +66,23 @@ func (oc *Controller) syncPods(pods []interface{}) {
 		portCache[lsp.UUID] = lsp
 	}
 	// get all the nodes from the watchFactory
-	nodes, err := oc.watchFactory.GetNodes()
-	if err != nil {
-		klog.Errorf("Failed to get nodes: %v", err)
-		return
+	var nodes []*kapi.Node
+	if oc.local {
+		node, err := oc.watchFactory.GetNode(oc.nodeName)
+		if err != nil {
+			klog.Errorf("Cannot sync pods, cannot retrieve node %s from watchFactory", oc.nodeName)
+			return
+		}
+		nodes = []*kapi.Node{node}
+	} else {
+		nodes, err = oc.watchFactory.GetNodes()
+
+		if err != nil {
+			klog.Errorf("Failed to get nodes: %v", err)
+			return
+		}
 	}
+
 	for _, n := range nodes {
 		stalePorts := []string{}
 		// find the logical switch for the node

@@ -111,6 +111,10 @@ type Controller struct {
 	egressFirewallHandler *factory.Handler
 	stopChan              <-chan struct{}
 
+	// If the Controller is running in local AZ or in global AZ mode
+	local    bool
+	nodeName string
+
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator *subnetallocator.SubnetAllocator
 
@@ -240,7 +244,7 @@ func GetIPFullMask(ip string) string {
 // infrastructure and policy
 func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory,
 	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
-	recorder record.EventRecorder) *Controller {
+	recorder record.EventRecorder, local bool, nodeName string) *Controller {
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
 	}
@@ -254,6 +258,8 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
 		},
+		local:                 local,
+		nodeName:              nodeName,
 		watchFactory:          wf,
 		stopChan:              stopChan,
 		masterSubnetAllocator: subnetallocator.NewSubnetAllocator(),
@@ -624,12 +630,33 @@ func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 	return oldPod.Annotations[nettypes.NetworkStatusAnnot] != newPod.Annotations[nettypes.NetworkStatusAnnot]
 }
 
+func (oc *Controller) isPodRelevant(pod *kapi.Pod) bool {
+	if oc.local && pod.Spec.NodeName == oc.nodeName {
+		// Pod is relevant.
+		return true
+	}
+
+	if !oc.local {
+		node, err := oc.kube.GetNode(pod.Spec.NodeName)
+		if err == nil && util.IsNodeGlobalAz(node) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // ensurePod tries to set up a pod. It returns success or failure; failure
 // indicates the pod should be retried later.
 func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 	// Try unscheduled pods later
 	if !util.PodScheduled(pod) {
 		return false
+	}
+
+	if !oc.isPodRelevant(pod) {
+		// Nothing to do.
+		return true
 	}
 
 	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
@@ -725,13 +752,15 @@ func (oc *Controller) WatchPods() {
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			go oc.metricsRecorder.CleanPodRecord(pod.UID)
-			oc.checkAndDeleteRetryPod(pod.UID)
-			if !util.PodWantsNetwork(pod) {
-				oc.deletePodExternalGW(pod)
-				return
+			if oc.isPodRelevant(pod) {
+				oc.checkAndDeleteRetryPod(pod.UID)
+				if !util.PodWantsNetwork(pod) {
+					oc.deletePodExternalGW(pod)
+					return
+				}
+				// deleteLogicalPort will take care of removing exgw for ovn networked pods
+				oc.deleteLogicalPort(pod)
 			}
-			// deleteLogicalPort will take care of removing exgw for ovn networked pods
-			oc.deleteLogicalPort(pod)
 		},
 	}, oc.syncPods)
 	klog.Infof("Bootstrapping existing pods and cleaning stale pods took %v", time.Since(start))

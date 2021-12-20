@@ -93,6 +93,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							namespaceT,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{
 							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -222,6 +227,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								UUID: "GR_node1-UUID",
 								Name: "GR_node1",
 							},
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -361,6 +371,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -521,6 +536,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								namespaceT,
 							},
 						},
+						&v1.NodeList{
+							Items: []v1.Node{
+								*newNode("node1", "192.168.126.202/24"),
+							},
+						},
 						&v1.PodList{
 							Items: []v1.Pod{
 								*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -675,6 +695,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								namespaceT,
 							},
 						},
+						&v1.NodeList{
+							Items: []v1.Node{
+								*newNode("node1", "192.168.126.202/24"),
+							},
+						},
 						&v1.PodList{
 							Items: []v1.Pod{
 								*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -783,6 +808,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						&v1.NamespaceList{
 							Items: []v1.Namespace{
 								namespaceT,
+							},
+						},
+						&v1.NodeList{
+							Items: []v1.Node{
+								*newNode("node1", "192.168.126.202/24"),
 							},
 						},
 						&v1.PodList{
@@ -980,6 +1010,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							namespaceT, namespaceX,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
+							*newNode("node2", "192.168.126.51/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{
 							gwPod,
@@ -1116,6 +1152,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT, namespaceX,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
+							*newNode("node2", "192.168.126.51/24"),
 						},
 					},
 					&v1.PodList{
@@ -1263,6 +1305,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							namespaceT, namespaceX,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
+							*newNode("node2", "192.168.126.51/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{
 							gwPod,
@@ -1402,6 +1450,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						&v1.NamespaceList{
 							Items: []v1.Namespace{
 								namespaceT, namespaceX,
+							},
+						},
+						&v1.NodeList{
+							Items: []v1.Node{
+								*newNode("node1", "192.168.126.202/24"),
+								*newNode("node2", "192.168.126.51/24"),
 							},
 						},
 						&v1.PodList{
@@ -1603,6 +1657,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							namespaceT,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
+							*newNode("node2", "192.168.126.51/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{
 							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -1714,6 +1774,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
+							*newNode("node2", "192.168.126.51/24"),
 						},
 					},
 					&v1.PodList{
@@ -1839,6 +1905,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -2195,6 +2266,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode("node1", "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{

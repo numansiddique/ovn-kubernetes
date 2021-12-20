@@ -102,7 +102,7 @@ func (o *FakeOVN) init() {
 	o.controller = NewOvnController(o.fakeClient, o.watcher,
 		o.stopChan, o.asf,
 		o.nbClient, o.sbClient,
-		o.fakeRecorder)
+		o.fakeRecorder, false, "master")
 	o.controller.multicastSupport = true
 	o.controller.loadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
 }
