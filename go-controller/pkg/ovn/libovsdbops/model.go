@@ -43,6 +43,10 @@ func getUUID(model model.Model) string {
 		return t.UUID
 	case *sbdb.Chassis:
 		return t.UUID
+	case *sbdb.Encap:
+		return t.UUID
+	case *sbdb.PortBinding:
+		return t.UUID
 	case *sbdb.MACBinding:
 		return t.UUID
 	default:
@@ -83,6 +87,10 @@ func setUUID(model model.Model, uuid string) {
 	case *nbdb.NBGlobal:
 		t.UUID = uuid
 	case *sbdb.Chassis:
+		t.UUID = uuid
+	case *sbdb.Encap:
+		t.UUID = uuid
+	case *sbdb.PortBinding:
 		t.UUID = uuid
 	case *sbdb.MACBinding:
 		t.UUID = uuid
@@ -165,6 +173,16 @@ func copyIndexes(model model.Model) model.Model {
 			UUID: t.UUID,
 			Name: t.Name,
 		}
+	case *sbdb.Encap:
+		return &sbdb.Encap{
+			UUID:        t.UUID,
+			ChassisName: t.ChassisName,
+		}
+	case *sbdb.PortBinding:
+		return &sbdb.PortBinding{
+			UUID:        t.UUID,
+			LogicalPort: t.LogicalPort,
+		}
 	case *sbdb.MACBinding:
 		return &sbdb.MACBinding{
 			UUID: t.UUID,
@@ -209,6 +227,10 @@ func getListFromModel(model model.Model) interface{} {
 		return &[]nbdb.NBGlobal{}
 	case *sbdb.Chassis:
 		return &[]sbdb.Chassis{}
+	case *sbdb.Encap:
+		return &[]sbdb.Encap{}
+	case *sbdb.PortBinding:
+		return &[]sbdb.PortBinding{}
 	case *sbdb.MACBinding:
 		return &[]sbdb.MACBinding{}
 	default:
