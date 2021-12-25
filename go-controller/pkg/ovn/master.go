@@ -533,7 +533,15 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 		return fmt.Errorf("failed to add router-type logical switch port %s to %s, error: %v",
 			drSwitchPort, types.OVNJoinSwitch, err)
 	}
-	return nil
+
+	return libovsdbops.UpdateNBAvailbilityZoneName(oc.nbClient, oc.getAvailaibityZoneName())
+}
+
+func (oc *Controller) getAvailaibityZoneName() string {
+	if oc.local {
+		return oc.nodeName
+	}
+	return types.GlobalAz
 }
 
 func (oc *Controller) addNodeLogicalSwitchPort(logicalSwitchName, portName, portType string, addresses []string, options map[string]string) (string, error) {

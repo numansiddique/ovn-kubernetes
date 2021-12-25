@@ -60,3 +60,38 @@ func UpdateNBGlobalOptions(nbClient libovsdbclient.Client, options map[string]st
 
 	return nil
 }
+
+func UpdateNBAvailbilityZoneName(nbClient libovsdbclient.Client, name string) error {
+	// find the nbGlobal table's UUID, we don't have any other way to reliably look this table entry since it can
+	// only be indexed by UUID
+	nbGlobal, err := FindNBGlobal(nbClient)
+	if err != nil {
+		return err
+	}
+
+	if nbGlobal.Name != name {
+		nbGlobal.Name = name
+		opModel := OperationModel{
+			Model: nbGlobal,
+			OnModelUpdates: []interface{}{
+				&nbGlobal.Name,
+			},
+		}
+
+		m := NewModelClient(nbClient)
+		if _, err := m.CreateOrUpdate(opModel); err != nil {
+			return fmt.Errorf("error while updating NBGlobal Name: %v error %v", name, err)
+		}
+	}
+
+	return nil
+}
+
+func GetNBAvailbilityZoneName(nbClient libovsdbclient.Client) (string, error) {
+	nbGlobal, err := FindNBGlobal(nbClient)
+	if err != nil {
+		return "", err
+	}
+
+	return nbGlobal.Name, nil
+}

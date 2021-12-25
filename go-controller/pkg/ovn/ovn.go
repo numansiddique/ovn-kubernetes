@@ -27,6 +27,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/interconnect"
 	bitmapallocator "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator/allocator"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
@@ -214,7 +215,8 @@ type Controller struct {
 
 	metricsRecorder *metrics.ControlPlaneRecorder
 
-	azIdBitmap *bitmapallocator.AllocationBitmap
+	azIdBitmap   *bitmapallocator.AllocationBitmap
+	icController *interconnect.Controller
 }
 
 type retryEntry struct {
@@ -272,14 +274,20 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 	svcController, svcFactory := newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient)
 	azIdBitmap := bitmapallocator.NewContiguousAllocationMap(5000, "az")
 	_, _ = azIdBitmap.Allocate(0)
+
+	kube := &kube.Kube{
+		KClient:              ovnClient.KubeClient,
+		EIPClient:            ovnClient.EgressIPClient,
+		EgressFirewallClient: ovnClient.EgressFirewallClient,
+		CloudNetworkClient:   ovnClient.CloudNetworkClient,
+	}
+
+	icConnect := interconnect.NewController(
+		ovnClient.KubeClient, kube, libovsdbOvnNBClient, libovsdbOvnSBClient)
+
 	return &Controller{
-		client: ovnClient.KubeClient,
-		kube: &kube.Kube{
-			KClient:              ovnClient.KubeClient,
-			EIPClient:            ovnClient.EgressIPClient,
-			EgressFirewallClient: ovnClient.EgressFirewallClient,
-			CloudNetworkClient:   ovnClient.CloudNetworkClient,
-		},
+		client:                ovnClient.KubeClient,
+		kube:                  kube,
 		local:                 local,
 		nodeName:              nodeName,
 		watchFactory:          wf,
@@ -321,6 +329,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		modelClient:              modelClient,
 		metricsRecorder:          metrics.NewControlPlaneRecorder(libovsdbOvnSBClient),
 		azIdBitmap:               azIdBitmap,
+		icController:             icConnect,
 	}
 }
 
@@ -353,6 +362,10 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 
 	// Services should be started after nodes to prevent LB churn
 	if err := oc.StartServiceController(wg, true); err != nil {
+		return err
+	}
+
+	if err := oc.StartInterconnectController(wg); err != nil {
 		return err
 	}
 
@@ -1479,6 +1492,21 @@ func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool)
 		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups)
 		if err != nil {
 			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
+		}
+	}()
+	return nil
+}
+
+func (oc *Controller) StartInterconnectController(wg *sync.WaitGroup) error {
+	klog.Infof("Starting OVN IC Controller")
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// use 5 workers like most of the kubernetes controllers in the
+		// kubernetes controller-manager
+		err := oc.icController.Run(oc.stopChan)
+		if err != nil {
+			klog.Errorf("Error running OVN InterConnect controller: %v", err)
 		}
 	}()
 	return nil
