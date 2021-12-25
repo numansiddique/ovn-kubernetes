@@ -100,6 +100,10 @@ func (lc *LocalController) Run(wg *sync.WaitGroup) error {
 		return err
 	}
 
+	if err := lc.oc.StartInterconnectController(wg); err != nil {
+		return err
+	}
+
 	klog.Infof("Starting all the Watchers...")
 	//start := time.Now()
 
