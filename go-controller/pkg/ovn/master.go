@@ -257,82 +257,9 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	// update metrics for host subnets
 	metrics.RecordSubnetCount(v4HostSubnetCount, v6HostSubnetCount)
 
-	if oc.multicastSupport {
-		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {
-			klog.Warningf("Multicast support enabled, however version of OVN in use does not support IGMP Group. " +
-				"Disabling Multicast Support")
-			oc.multicastSupport = false
-		}
-	}
-
-	meterFairness := true
-
-	// This always needs to be looked up in two transactions because there's no way to lookup
-	// a meter's meter_band
-	aclLogMeterPtr, err := libovsdbops.FindMeterByName(oc.nbClient, types.OvnACLLoggingMeter)
-	if err != nil && err != libovsdbclient.ErrNotFound {
-		// Log error but don't stop master setup
-		klog.Errorf("ACL logging support enabled, however failed to find acl-logging meter err: %v"+
-			"Disabling ACL logging support", err)
-		oc.aclLoggingEnabled = false
-	}
-
-	// if meter exists update its fairness and rate limit, otherwise create it
-	if aclLogMeterPtr != nil {
-		// update fairness
-		if err := libovsdbops.UpdateMeterFairness(oc.nbClient, aclLogMeterPtr, meterFairness); err != nil {
-			klog.Warningf("Failed to enable 'fair' metering for %s meter: %v", types.OvnACLLoggingMeter, err)
-		}
-		// get all MeterBands and update their rate limit
-		if meterBands, err := libovsdbops.GetMeterBands(oc.nbClient, aclLogMeterPtr); err == nil {
-			for _, meterBand := range meterBands {
-				if err := libovsdbops.UpdateMeterBandRate(oc.nbClient, meterBand, config.Logging.ACLLoggingRateLimit); err != nil {
-					klog.Warningf("Failed to update MeterBand '%s': %v", meterBand.UUID, err)
-				}
-			}
-		} else {
-			klog.Warningf("Could not find MeterBands for Meter '%s': %v", aclLogMeterPtr.Name, err)
-		}
-	} else {
-		meterBand := &nbdb.MeterBand{
-			Action: types.MeterAction,
-			Rate:   config.Logging.ACLLoggingRateLimit,
-		}
-		meter := &nbdb.Meter{
-			Name: types.OvnACLLoggingMeter,
-			Fair: &meterFairness,
-			Unit: types.PacketsPerSecond,
-		}
-
-		if _, err := libovsdbops.CreateMeterWithBand(oc.nbClient, meter, meterBand); err != nil {
-			klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created: %v. "+
-				"Disabling ACL logging support", err)
-			oc.aclLoggingEnabled = false
-		}
-
-	}
-
-	// FIXME: When https://github.com/ovn-org/libovsdb/issues/235 is fixed,
-	// use IsTableSupported(nbdb.LoadBalancerGroup).
-	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
-		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
-	} else {
-		loadBalancerGroup := nbdb.LoadBalancerGroup{
-			Name: types.ClusterLBGroupName,
-		}
-		// Create loadBalancerGroup if needed. Since this table is indexed by name, there is no need to
-		// mention that field in OnModelUpdates or ModelPredicate.
-		opModels := []libovsdbops.OperationModel{
-			{
-				Name:  loadBalancerGroup.Name,
-				Model: &loadBalancerGroup,
-			},
-		}
-		if _, err = oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-			klog.Errorf("Error creating cluster-wide load balancer group (%v)", err)
-			return err
-		}
-		oc.loadBalancerGroupUUID = loadBalancerGroup.UUID
+	err = oc.probeOvnFeatures()
+	if err != nil {
+		return err
 	}
 
 	if err := oc.SetupMaster(masterNodeName, nodeNames); err != nil {
