@@ -256,6 +256,9 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 					klog.Errorf("Failed to get all the pods (%v)", err)
 				}
 				for _, pod := range existingPods {
+					if !oc.isPodRelevant(pod) {
+						continue
+					}
 					logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 					portInfo, err := oc.logicalPortCache.get(logicalPort)
 					if err != nil {
@@ -288,6 +291,9 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 				klog.Errorf("Failed to get all the pods (%v)", err)
 			}
 			for _, pod := range existingPods {
+				if !oc.isPodRelevant(pod) {
+					continue
+				}
 				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 				if err != nil {
 					klog.Error(err.Error())
@@ -534,7 +540,7 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 	} else {
 		ips = make([]net.IP, 0, len(existingPods))
 		for _, pod := range existingPods {
-			if pod.Status.PodIP != "" && !pod.Spec.HostNetwork {
+			if pod.Status.PodIP != "" && !pod.Spec.HostNetwork && oc.isPodRelevant(pod) {
 				podIPs, err := util.GetAllPodIPs(pod)
 				if err != nil {
 					klog.Warningf(err.Error())
