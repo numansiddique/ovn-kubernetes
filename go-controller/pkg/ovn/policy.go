@@ -659,6 +659,10 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 			return
 		}
 
+		if !oc.isPodRelevant(pod) {
+			return
+		}
+
 		logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 		var portInfo *lpInfo
 
@@ -735,6 +739,10 @@ func (oc *Controller) processLocalPodSelectorDelPods(np *networkPolicy,
 		pod := obj.(*kapi.Pod)
 
 		if pod.Spec.NodeName == "" {
+			continue
+		}
+
+		if !oc.isPodRelevant(pod) {
 			continue
 		}
 
@@ -1185,7 +1193,9 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, objs ...in
 		if pod.Spec.NodeName == "" {
 			continue
 		}
-		pods = append(pods, pod)
+		if oc.isPodRelevant(pod) {
+			pods = append(pods, pod)
+		}
 	}
 	if err := gp.addPeerPods(pods...); err != nil {
 		klog.Errorf(err.Error())
@@ -1200,8 +1210,10 @@ func (oc *Controller) handlePeerPodSelectorDelete(gp *gressPolicy, obj interface
 	if pod.Spec.NodeName == "" {
 		return
 	}
-	if err := gp.deletePeerPod(pod); err != nil {
-		klog.Errorf(err.Error())
+	if oc.isPodRelevant(pod) {
+		if err := gp.deletePeerPod(pod); err != nil {
+			klog.Errorf(err.Error())
+		}
 	}
 }
 

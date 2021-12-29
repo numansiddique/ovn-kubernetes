@@ -633,7 +633,9 @@ func (oc *Controller) addRetryPods(pods []kapi.Pod) {
 		if entry, ok := oc.retryPods[pod.UID]; ok {
 			entry.timeStamp = time.Now()
 		} else {
-			oc.retryPods[pod.UID] = &retryEntry{&pod, time.Now(), 1, false}
+			if oc.isPodRelevant(&pod) {
+				oc.retryPods[pod.UID] = &retryEntry{&pod, time.Now(), 1, false}
+			}
 		}
 	}
 }
