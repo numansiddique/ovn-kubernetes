@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sync"
@@ -12,6 +13,8 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -107,11 +110,14 @@ func (lc *LocalController) Run(wg *sync.WaitGroup) error {
 	klog.Infof("Starting all the Watchers...")
 	//start := time.Now()
 
-	lc.WatchNamespaces()
+	lc.oc.WatchNamespaces()
 
 	lc.WatchNodes()
 
 	lc.oc.WatchPods()
+
+	// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
+	lc.oc.WatchNetworkPolicy()
 	return nil
 }
 
@@ -162,14 +168,14 @@ func (lc *LocalController) WatchNodes() {
 			}
 
 			// ensure pods that already exist on this node have their logical ports created
-			//options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
-			//pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
-			//if err != nil {
-			//	klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
-			//} else {
-			//	oc.addRetryPods(pods.Items)
-			//	oc.requestRetryPods()
-			//}
+			options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
+			pods, err := lc.oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
+			if err != nil {
+				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
+			} else {
+				lc.oc.addRetryPods(pods.Items)
+				lc.oc.requestRetryPods()
+			}
 		},
 		UpdateFunc: func(old, new interface{}) {
 		},
