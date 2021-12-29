@@ -93,6 +93,11 @@ func (lc *LocalController) Run(wg *sync.WaitGroup) error {
 	}
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", lc.nodeName, util.JoinIPNets(subnets, ","))
 
+	err = lc.oc.probeOvnFeatures()
+	if err != nil {
+		return err
+	}
+
 	_ = lc.oc.SetupMaster(lc.nodeName, make([]string, 0))
 	err = lc.oc.ensureNodeLogicalNetwork(node, subnets)
 	if err != nil {

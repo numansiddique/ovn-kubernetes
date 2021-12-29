@@ -1451,3 +1451,72 @@ func (oc *Controller) StartInterconnectController(wg *sync.WaitGroup) error {
 	}()
 	return nil
 }
+
+func (oc *Controller) probeOvnFeatures() error {
+	if oc.multicastSupport {
+		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {
+			klog.Warningf("Multicast support enabled, however version of OVN in use does not support IGMP Group. " +
+				"Disabling Multicast Support")
+			oc.multicastSupport = false
+		}
+	}
+
+	meterFairness := true
+
+	// This always needs to be looked up in two transactions because there's no way to lookup
+	// a meter's meter_band
+	aclLogMeterPtr, err := libovsdbops.FindMeterByName(oc.nbClient, ovntypes.OvnACLLoggingMeter)
+	if err != nil && err != libovsdbclient.ErrNotFound {
+		// Log error but don't stop master setup
+		klog.Errorf("ACL logging support enabled, however failed to find acl-logging meter err: %v"+
+			"Disabling ACL logging support", err)
+		oc.aclLoggingEnabled = false
+	}
+
+	// if meter exists update its fairness, otherwise create it
+	if aclLogMeterPtr != nil {
+		if err := libovsdbops.UpdateMeterFairness(oc.nbClient, aclLogMeterPtr, meterFairness); err != nil {
+			klog.Warningf("Failed to enable 'fair' metering for %s meter: %v", ovntypes.OvnACLLoggingMeter, err)
+		}
+	} else {
+		meterBand := &nbdb.MeterBand{
+			Action: ovntypes.MeterAction,
+			Rate:   config.Logging.ACLLoggingRateLimit,
+		}
+		meter := &nbdb.Meter{
+			Name: ovntypes.OvnACLLoggingMeter,
+			Fair: &meterFairness,
+			Unit: ovntypes.PacketsPerSecond,
+		}
+
+		if err := libovsdbops.CreateMeterWithBand(oc.nbClient, meter, meterBand); err != nil {
+			klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created: %v. "+
+				"Disabling ACL logging support", err)
+			oc.aclLoggingEnabled = false
+		}
+
+	}
+
+	// FIXME: When https://github.com/ovn-org/libovsdb/issues/235 is fixed,
+	// use IsTableSupported(nbdb.LoadBalancerGroup).
+	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
+		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
+	} else {
+		loadBalancerGroup := nbdb.LoadBalancerGroup{
+			Name: ovntypes.ClusterLBGroupName,
+		}
+		// Create loadBalancerGroup if needed. Since this table is indexed by name, there is no need to
+		// mention that field in OnModelUpdates or ModelPredicate.
+		opModels := []libovsdbops.OperationModel{
+			{
+				Model: &loadBalancerGroup,
+			},
+		}
+		if _, err = oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+			klog.Errorf("Error creating cluster-wide load balancer group (%v)", err)
+			return err
+		}
+		oc.loadBalancerGroupUUID = loadBalancerGroup.UUID
+	}
+	return nil
+}
