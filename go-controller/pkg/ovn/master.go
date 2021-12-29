@@ -256,67 +256,9 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	// update metrics for host subnets
 	metrics.RecordSubnetCount(v4HostSubnetCount, v6HostSubnetCount)
 
-	if oc.multicastSupport {
-		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {
-			klog.Warningf("Multicast support enabled, however version of OVN in use does not support IGMP Group. " +
-				"Disabling Multicast Support")
-			oc.multicastSupport = false
-		}
-	}
-
-	if stdout, _, err := util.RunOVNNbctl("--data=bare", "--format=csv", "--no-headings", "--columns=_uuid,fair",
-		"find", "meter", "name="+types.OvnACLLoggingMeter); err == nil {
-		if stdout != "" {
-			columns := strings.Split(stdout, ",")
-			uuid := columns[0]
-			fair := columns[1]
-			if fair == "false" {
-				// fair metering ensures that instead of sharing one meter across several entities
-				// each entity will be rate-limited on its own
-				if _, _, err := util.RunOVNNbctl("set", "meter", uuid, "fair=true"); err != nil {
-					klog.Warningf("Failed to enable 'fair' metering for %s meter: %v", types.OvnACLLoggingMeter, err)
-				}
-			}
-		} else {
-			dropRate := strconv.Itoa(config.Logging.ACLLoggingRateLimit)
-			if _, _, err := util.RunOVNNbctl("--fair", "meter-add", types.OvnACLLoggingMeter, "drop", dropRate, "pktps"); err != nil {
-				klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created: %v. "+
-					"Disabling ACL logging support", err)
-				oc.aclLoggingEnabled = false
-			}
-		}
-	}
-
-	// FIXME: When https://github.com/ovn-org/libovsdb/issues/235 is fixed,
-	// use IsTableSupported(nbdb.LoadBalancerGroup).
-	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
-		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
-	} else {
-		loadBalancerGroup := nbdb.LoadBalancerGroup{
-			Name: types.ClusterLBGroupName,
-		}
-		loadBalancerGroupRes := []nbdb.LoadBalancerGroup{}
-		opModels := []libovsdbops.OperationModel{
-			{
-				Model:          &loadBalancerGroup,
-				ModelPredicate: func(lbg *nbdb.LoadBalancerGroup) bool { return lbg.Name == types.ClusterLBGroupName },
-				OnModelUpdates: []interface{}{
-					&loadBalancerGroup.Name,
-				},
-				ExistingResult: &loadBalancerGroupRes,
-				DoAfter: func() {
-					if len(loadBalancerGroupRes) > 0 {
-						loadBalancerGroup.UUID = loadBalancerGroupRes[0].UUID
-					}
-				},
-				ErrNotFound: false,
-			},
-		}
-		if _, err = oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-			klog.Errorf("Error creating cluster-wide load balancer group (%v)", err)
-			return err
-		}
-		oc.loadBalancerGroupUUID = loadBalancerGroup.UUID
+	err = oc.probeOvnFeatures()
+	if err != nil {
+		return err
 	}
 
 	if err := oc.SetupMaster(masterNodeName, nodeNames); err != nil {
