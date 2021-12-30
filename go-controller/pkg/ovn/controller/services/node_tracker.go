@@ -40,6 +40,8 @@ type nodeInfo struct {
 	gatewayRouterName string
 	// The name of the node's switch - never empty
 	switchName string
+
+	azName string
 }
 
 // returns a list of all ip blocks "assigned" to this node
@@ -122,13 +124,14 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) *nodeTracker {
 
 // updateNodeInfo updates the node info cache, and syncs all services
 // if it changed.
-func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName string, nodeIPs []string, podSubnets []*net.IPNet) {
+func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName string, nodeIPs []string, podSubnets []*net.IPNet, azName string) {
 	ni := nodeInfo{
 		name:              nodeName,
 		nodeIPs:           nodeIPs,
 		podSubnets:        make([]net.IPNet, 0, len(podSubnets)),
 		gatewayRouterName: routerName,
 		switchName:        switchName,
+		azName:            azName,
 	}
 	for i := range podSubnets {
 		ni.podSubnets = append(ni.podSubnets, *podSubnets[i]) // de-pointer
@@ -197,6 +200,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		grName,
 		ips,
 		hsn,
+		util.GetNodeAzName(node),
 	)
 }
 
@@ -208,6 +212,25 @@ func (nt *nodeTracker) allNodes() []nodeInfo {
 	out := make([]nodeInfo, 0, len(nt.nodes))
 	for _, node := range nt.nodes {
 		out = append(out, node)
+	}
+
+	// Sort the returned list of nodes
+	// so that other operations that consume this data can just do a DeepEquals of things
+	// (e.g. LB routers + switches) without having to do set arithmetic
+	sort.SliceStable(out, func(i, j int) bool { return out[i].name < out[j].name })
+	return out
+}
+
+// allNodes returns a list of all nodes (and their relevant information)
+func (nt *nodeTracker) allAzNodes(azName string) []nodeInfo {
+	nt.Lock()
+	defer nt.Unlock()
+
+	out := make([]nodeInfo, 0, len(nt.nodes))
+	for _, node := range nt.nodes {
+		if node.azName == azName {
+			out = append(out, node)
+		}
 	}
 
 	// Sort the returned list of nodes

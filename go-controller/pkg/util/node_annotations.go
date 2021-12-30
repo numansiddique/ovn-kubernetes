@@ -466,14 +466,18 @@ func ParseNodeHostAddresses(node *kapi.Node) (sets.String, error) {
 	return sets.NewString(cfg...), nil
 }
 
-func IsNodeGlobalAz(node *kapi.Node) bool {
+func GetNodeAzName(node *kapi.Node) string {
 	azName, ok := node.Annotations[ovnNodeAzName]
 	if !ok {
-		// If the annotation is not set, then consider node as part of global AZ
-		return true
+		return ""
 	}
 
-	return azName == types.GlobalAz
+	return azName
+}
+
+func IsNodeGlobalAz(node *kapi.Node) bool {
+	azName := GetNodeAzName(node)
+	return azName == "" || azName == types.GlobalAz
 }
 
 func SetNodeAzName(nodeAnnotator kube.Annotator, azName string) error {
