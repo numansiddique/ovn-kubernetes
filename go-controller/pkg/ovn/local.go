@@ -112,6 +112,14 @@ func (lc *LocalController) Run(wg *sync.WaitGroup) error {
 		return err
 	}
 
+	// Start service watch factory and sync services
+	lc.oc.svcFactory.Start(lc.oc.stopChan)
+
+	// Services should be started after nodes to prevent LB churn
+	if err := lc.oc.StartServiceController(wg, true); err != nil {
+		return err
+	}
+
 	klog.Infof("Starting all the Watchers...")
 	//start := time.Now()
 
