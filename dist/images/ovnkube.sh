@@ -1257,9 +1257,17 @@ ovn-node() {
   ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
 
   echo "=============== ovn-node   --init-node"
+  ovn_dbs=""
+  if [[ $ovn_nbdb != "local" ]]; then
+      ovn_dbs="--nb-address=${ovn_nbdb}"
+  fi
+  if [[ $ovn_sbdb != "local" ]]; then
+      ovn_dbs="${ovn_dbs} --sb-address=${ovn_sbdb}"
+  fi
+
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
-    --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
+    $ovn_dbs \
     ${ovn_unprivileged_flag} \
     --nodeport \
     --mtu=${mtu} \
@@ -1469,8 +1477,7 @@ ovn-local() {
     ovn_unprivileged_flag=""
   fi
 
-  ovn_metrics_bind_address="${metrics_endpoint_ip}:9476"
-  ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
+  ovnkube_local_metrics_bind_address="${metrics_endpoint_ip}:9411"
 
 
   echo "=============== ovn-local --init-local"
@@ -1496,7 +1503,6 @@ ovn-local() {
     ${ovn_acl_logging_rate_limit_flag} \
     ${egressip_enabled_flag} \
     ${egressfirewall_enabled_flag} \
-    --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} \
     ${monitor_all} \
     ${enable_lflow_cache} \
@@ -1508,8 +1514,7 @@ ovn-local() {
     ${netflow_targets} \
     ${sflow_targets} \
     ${ipfix_targets} \
-    --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
-    --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
+    --metrics-bind-address ${ovnkube_local_metrics_bind_address} \
      ${ovnkube_node_mode_flag} \
     ${egress_interface} \
     ${ovnkube_node_mgmt_port_netdev_flag} &

@@ -422,9 +422,165 @@ spec:
               name: ovn-config
               key: host_network_namespace
 
+      - name: ovnkube-node
+        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+
+        command: ["/root/ovnkube.sh", "ovn-node"]
+
+        securityContext:
+          runAsUser: 0
+          {% if ovn_unprivileged_mode=="no" -%}
+          privileged: true
+          {% else -%}
+          capabilities:
+            add:
+            - NET_ADMIN
+          {% endif %}
+
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        # Common mounts
+        # for the iptables wrapper
+        - mountPath: /host
+          name: host-slash
+          readOnly: true
+        - mountPath: /var/run/dbus/
+          name: host-var-run-dbus
+          readOnly: true
+        - mountPath: /var/log/ovn-kubernetes/
+          name: host-var-log-ovnkube
+          # We mount our socket here
+        - mountPath: /var/run/ovn-kubernetes
+          name: host-var-run-ovn-kubernetes
+        # CNI related mounts which we take over
+        - mountPath: /opt/cni/bin
+          name: host-opt-cni-bin
+        - mountPath: /etc/cni/net.d
+          name: host-etc-cni-netd
+        - mountPath: /var/run/netns
+          name: host-netns
+          mountPropagation: Bidirectional
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
+        - mountPath: /etc/openvswitch/
+          name: host-var-lib-ovs
+          readOnly: true
+        - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+          readOnly: true
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "3"
+        - name: OVNKUBE_LOGLEVEL
+          value: "{{ ovnkube_node_loglevel }}"
+        - name: OVNKUBE_LOGFILE_MAXSIZE
+          value: "{{ ovnkube_logfile_maxsize }}"
+        - name: OVNKUBE_LOGFILE_MAXBACKUPS
+          value: "{{ ovnkube_logfile_maxbackups }}"
+        - name: OVNKUBE_LOGFILE_MAXAGE
+          value: "{{ ovnkube_logfile_maxage }}"
+        - name: OVN_NET_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: net_cidr
+        - name: OVN_SVC_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: svc_cidr
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
+        - name: OVN_MTU
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: mtu
+        - name: OVN_ROUTABLE_MTU
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: routable_mtu
+              optional: true
+        - name: K8S_NODE
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: OVN_GATEWAY_MODE
+          value: "{{ ovn_gateway_mode }}"
+        - name: OVN_GATEWAY_OPTS
+          value: "{{ ovn_gateway_opts }}"
+        - name: OVN_HYBRID_OVERLAY_ENABLE
+          value: "{{ ovn_hybrid_overlay_enable }}"
+        - name: OVN_EGRESSIP_ENABLE
+          value: "{{ ovn_egress_ip_enable }}"
+        - name: OVN_HYBRID_OVERLAY_NET_CIDR
+          value: "{{ ovn_hybrid_overlay_net_cidr }}"
+        - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
+          value: "{{ ovn_disable_snat_multiple_gws }}"
+        - name: OVN_DISABLE_PKT_MTU_CHECK
+          value: "{{ ovn_disable_pkt_mtu_check }}"
+        - name: OVN_NETFLOW_TARGETS
+          value: "{{ ovn_netflow_targets }}"
+        - name: OVN_SFLOW_TARGETS
+          value: "{{ ovn_sflow_targets }}"
+        - name: OVN_IPFIX_TARGETS
+          value: "{{ ovn_ipfix_targets }}"
+        - name: OVN_V4_JOIN_SUBNET
+          value: "{{ ovn_v4_join_subnet }}"
+        - name: OVN_V6_JOIN_SUBNET
+          value: "{{ ovn_v6_join_subnet }}"
+        - name: OVN_MULTICAST_ENABLE
+          value: "{{ ovn_multicast_enable }}"
+        - name: OVN_UNPRIVILEGED_MODE
+          value: "{{ ovn_unprivileged_mode }}"
+        - name: OVN_EX_GW_NETWORK_INTERFACE
+          value: "{{ ovn_ex_gw_networking_interface }}"
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
+        - name: OVN_DISABLE_OVN_IFACE_ID_VER
+          value: "{{ ovn_disable_ovn_iface_id_ver }}"
+        - name: OVN_REMOTE_PROBE_INTERVAL
+          value: "{{ ovn_remote_probe_interval }}"
+        - name: OVN_MONITOR_ALL
+          value: "{{ ovn_monitor_all }}"
+        - name: OVN_ENABLE_LFLOW_CACHE
+          value: "{{ ovn_enable_lflow_cache }}"
+        - name: OVN_LFLOW_CACHE_LIMIT
+          value: "{{ ovn_lflow_cache_limit }}"
+        - name: OVN_LFLOW_CACHE_LIMIT_KB
+          value: "{{ ovn_lflow_cache_limit_kb }}"
+        - name: OVN_HOST_NETWORK_NAMESPACE
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: host_network_namespace
+        - name: OVN_NORTH
+          value: "local"
+        - name: OVN_SOUTH
+          value: "local"
+
         readinessProbe:
           exec:
-            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-local"]
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-node"]
           initialDelaySeconds: 30
           timeoutSeconds: 30
           periodSeconds: 60
