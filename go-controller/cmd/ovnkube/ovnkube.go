@@ -201,10 +201,6 @@ func runOvnKube(ctx *cli.Context) error {
 	node := ctx.String("init-node")
 	local := ctx.String("init-local")
 
-	if local != "" {
-		node = local
-	}
-
 	cleanupNode := ctx.String("cleanup-node")
 	if cleanupNode != "" {
 		if master != "" || node != "" {
@@ -290,10 +286,10 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.RegisterNodeMetrics()
 		start := time.Now()
 		var azName string
-		if local != "" {
-			azName = types.GlobalAz
-		} else {
+		if config.OvnSouth.Scheme == config.OvnDBSchemeUnix {
 			azName = node
+		} else {
+			azName = types.GlobalAz
 		}
 		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, stopChan, util.EventRecorder(ovnClientset.KubeClient), azName)
 		if err := n.Start(wg); err != nil {
