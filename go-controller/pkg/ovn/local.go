@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -86,20 +88,25 @@ func (lc *LocalController) Run(wg *sync.WaitGroup) error {
 			klog.Infof("Waiting for node %s to start, no annotation found on node for subnet: %v", lc.nodeName, err)
 			return false, nil
 		}
+		if util.GetNodeId(node) == -1 {
+			klog.Infof("Still waiting for master to annotate nodeId on node %s", lc.nodeName)
+			return false, nil
+		}
 		return true, nil
 	})
 	if err != nil {
 		return fmt.Errorf("timed out waiting for node's: %q logical switch: %v", lc.nodeName, err)
 	}
-	klog.Infof("Node %s ready for ovn initialization with subnet %s", lc.nodeName, util.JoinIPNets(subnets, ","))
+
+	nodeId := util.GetNodeId(node)
+	joinSubnets, err := config.GetJoinSubnets(nodeId)
+	if err != nil {
+		return fmt.Errorf("failed to get join subnets for node %s: %v", lc.nodeName, err)
+	}
+	klog.Infof("Node %s ready for ovn initialization with: host subnet %s join subnet %s",
+		lc.nodeName, util.JoinIPNets(subnets, ","), util.JoinIPNets(joinSubnets, ","))
 
 	err = lc.oc.probeOvnFeatures()
-	if err != nil {
-		return err
-	}
-
-	_ = lc.oc.SetupMaster(lc.nodeName, make([]string, 0))
-	err = lc.oc.ensureNodeLogicalNetwork(node, subnets)
 	if err != nil {
 		return err
 	}
@@ -120,17 +127,10 @@ func (lc *LocalController) Run(wg *sync.WaitGroup) error {
 		return err
 	}
 
-	klog.Infof("Starting all the Watchers...")
-	//start := time.Now()
-
-	lc.oc.WatchNamespaces()
+	klog.Infof("Starting some of the Watchers...")
 
 	lc.WatchNodes()
 
-	lc.oc.WatchPods()
-
-	// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
-	lc.oc.WatchNetworkPolicy()
 	return nil
 }
 
@@ -154,10 +154,24 @@ func (lc *LocalController) WatchNodes() {
 				return
 			}
 
+			err = lc.oc.SetupMaster(lc.nodeName, make([]string, 0), util.GetNodeId(node))
+            if err != nil {
+                return
+            }
+
 			err = lc.oc.ensureNodeLogicalNetwork(node, subnets)
 			if err != nil {
 				return
 			}
+
+			klog.Infof("Starting some more of the Watchers...")
+
+			lc.oc.WatchNamespaces()
+
+			lc.oc.WatchPods()
+
+			// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
+			lc.oc.WatchNetworkPolicy()
 
 			if err = lc.oc.syncNodeClusterRouterPort(node, subnets); err != nil {
 				if !util.IsAnnotationNotSetError(err) {
