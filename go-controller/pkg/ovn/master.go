@@ -262,7 +262,9 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		return err
 	}
 
-	if err := oc.SetupMaster(masterNodeName, nodeNames, 0); err != nil {
+	// Store master Node ID.
+	oc.storeNodeId(masterNodeName, types.GlobalAzID)
+	if err := oc.SetupMaster(masterNodeName, nodeNames, types.GlobalAzID); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
@@ -1364,13 +1366,6 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 			// TODO (flaviof): keep going even if EnsureJoinLRPIPs returned an error. Maybe we should not.
 			klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
 		}
-
-		if !oc.local {
-			nodeId := util.GetNodeId(node)
-			if nodeId != -1 {
-				_, _ = oc.azIdBitmap.Allocate(int(nodeId))
-			}
-		}
 	}
 	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 
@@ -1437,23 +1432,57 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 	return nil
 }
 
+func (oc *Controller) storeNodeId(nodeName string, nodeId int) {
+	klog.Infof("syncNodeAz : Setting Id for node %q in annotations and cache", nodeName)
+	_ = oc.kube.SetAnnotationsOnNode(nodeName, map[string]interface{}{util.OvnNodeId: strconv.Itoa(nodeId)})
+	oc.azIdCache[nodeName] = nodeId
+}
+
+func (oc *Controller) removeNodeId(nodeName string, nodeId int) {
+	klog.Infof("syncNodeAz deleting node %q ID %d", nodeName, nodeId)
+	if nodeId != -1 {
+		_ = oc.azIdBitmap.Release(nodeId)
+	}
+	delete(oc.azIdCache, nodeName)
+}
+
 func (oc *Controller) syncNodeId(node *kapi.Node, deleted bool) error {
 	if oc.local {
 		return nil
 	}
+
 	klog.Infof("syncNodeAzId entered for node %q", node.Name)
-	nodeId := util.GetNodeId(node)
-	klog.Infof("syncNodeAz Id for node %q is %d", node.Name, nodeId)
+
+	oc.azIdCacheLock.Lock()
+	defer func() {
+		oc.azIdCacheLock.Unlock()
+		klog.Infof("syncNodeAzId done for node %q", node.Name)
+	}()
+
+	klog.Infof("syncNodeAzId got lock for node %q", node.Name)
+
+	// First try the cache.
+	nodeId, ok := oc.azIdCache[node.Name]
+	if ok {
+		klog.Infof("syncNodeAzId found node %q in cache with ID %d", node.Name, nodeId)
+	} else {
+		// Next try kube annotations.
+		nodeId = util.GetNodeId(node)
+	}
+
+	klog.Infof("syncNodeAzId node %q ID %d", node.Name, nodeId)
 
 	if nodeId == -1 {
-		id, allocated, _ := oc.azIdBitmap.AllocateNext()
-		klog.Infof("syncNodeAz Id allocated for node %q is %d", node.Name, id)
+		nodeId, allocated, _ := oc.azIdBitmap.AllocateNext()
+		klog.Infof("syncNodeAz Id allocated for node %q is %d", node.Name, nodeId)
 		if allocated {
-			klog.Infof("syncNodeAz : Setting Id for node %q in annotations", node.Name)
-			_ = oc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{util.OvnNodeId: strconv.Itoa(id)})
+			oc.storeNodeId(node.Name, nodeId)
+		} else {
+			klog.Infof("syncNodeAz failed to allocate ID for node %q", node.Name)
+			oc.removeNodeId(node.Name, -1)
 		}
 	} else if deleted {
-		_ = oc.azIdBitmap.Release(nodeId)
+		oc.removeNodeId(node.Name, nodeId)
 	}
 
 	return nil
