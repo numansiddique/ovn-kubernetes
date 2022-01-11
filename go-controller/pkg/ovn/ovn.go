@@ -207,8 +207,10 @@ type Controller struct {
 
 	metricsRecorder *metrics.ControlPlaneRecorder
 
-	azIdBitmap   *bitmapallocator.AllocationBitmap
-	icController *interconnect.Controller
+	azIdBitmap    *bitmapallocator.AllocationBitmap
+	azIdCache     map[string]int
+	azIdCacheLock sync.Mutex
+	icController  *interconnect.Controller
 }
 
 type retryEntry struct {
@@ -254,8 +256,8 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 	}
 	modelClient := libovsdbops.NewModelClient(libovsdbOvnNBClient)
 	svcController, svcFactory := newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient)
-	azIdBitmap := bitmapallocator.NewContiguousAllocationMap(5000, "az")
-	_, _ = azIdBitmap.Allocate(0)
+	azIdBitmap := bitmapallocator.NewContiguousAllocationMap(ovntypes.AzMax, "az")
+	_, _ = azIdBitmap.Allocate(ovntypes.GlobalAzID)
 
 	kube := &kube.Kube{
 		KClient:              ovnClient.KubeClient,
@@ -309,6 +311,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		modelClient:              modelClient,
 		metricsRecorder:          metrics.NewControlPlaneRecorder(libovsdbOvnSBClient),
 		azIdBitmap:               azIdBitmap,
+		azIdCache:                make(map[string]int),
 		icController:             icConnect,
 	}
 }
