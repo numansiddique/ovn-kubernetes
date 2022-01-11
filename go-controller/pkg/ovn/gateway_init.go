@@ -344,10 +344,22 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 			oc.staticRouteCleanup([]net.IP{mgmtIfAddr.IP})
 
+			// When running in local mode (interconnect-mode) jsut add a plain
+			// default route.  Otherwise add a policy=src-ip route to move all
+			// the traffic originated on the local node via the GW router.
 			logicalRouterStaticRoute := nbdb.LogicalRouterStaticRoute{
-				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-				IPPrefix: hostSubnet.String(),
-				Nexthop:  gwLRPIP[0].String(),
+				Nexthop: gwLRPIP[0].String(),
+			}
+			if oc.local {
+				logicalRouterStaticRoute.Policy = &nbdb.LogicalRouterStaticRoutePolicyDstIP
+				if utilnet.IsIPv6CIDR(hostSubnet) {
+					logicalRouterStaticRoute.IPPrefix = "::/0"
+				} else {
+					logicalRouterStaticRoute.IPPrefix = "0.0.0.0/0"
+				}
+			} else {
+				logicalRouterStaticRoute.Policy = &nbdb.LogicalRouterStaticRoutePolicySrcIP
+				logicalRouterStaticRoute.IPPrefix = hostSubnet.String()
 			}
 			opModels = []libovsdbops.OperationModel{
 				{

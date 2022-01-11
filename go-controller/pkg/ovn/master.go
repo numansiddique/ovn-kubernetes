@@ -262,7 +262,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		return err
 	}
 
-	if err := oc.SetupMaster(masterNodeName, nodeNames); err != nil {
+	if err := oc.SetupMaster(masterNodeName, nodeNames, 0); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
@@ -286,7 +286,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 }
 
 // SetupMaster creates the central router and load-balancers for the network
-func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []string) error {
+func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []string, joinOffset int) error {
 	// Create a single common distributed router for the cluster.
 	logicalRouter := nbdb.LogicalRouter{
 		Name: types.OVNClusterRouter,
@@ -377,7 +377,7 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 
 	// Initialize the OVNJoinSwitch switch IP manager
 	// The OVNJoinSwitch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
-	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.nbClient, logicalSwitch.UUID, existingNodeNames)
+	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.nbClient, logicalSwitch.UUID, existingNodeNames, joinOffset)
 	if err != nil {
 		return err
 	}

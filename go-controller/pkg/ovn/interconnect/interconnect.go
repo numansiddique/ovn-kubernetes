@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -45,6 +47,7 @@ type nodeInfo struct {
 	id    int
 
 	nodeSubnets []*net.IPNet
+	joinSubnets []*net.IPNet
 	chassisID   string
 }
 
@@ -202,6 +205,12 @@ func (ic *Controller) updateNodeInfo(node *v1.Node, nodeId int) {
 		return
 	}
 
+	joinSubnets, err := config.GetJoinSubnets(nodeId)
+	if err != nil {
+		klog.Infof("Failed to parse node %s join subnets annotation %v", node.Name, err)
+		return
+	}
+
 	ni := nodeInfo{
 		name:           node.Name,
 		isNodeGlobalAz: util.IsNodeGlobalAz(node),
@@ -211,6 +220,7 @@ func (ic *Controller) updateNodeInfo(node *v1.Node, nodeId int) {
 		tsIp:           tsIp.String(),
 		chassisID:      chassisID,
 		nodeSubnets:    nodeSubnets,
+		joinSubnets:    joinSubnets,
 	}
 
 	ic.Lock()
@@ -384,7 +394,7 @@ func (ic *Controller) addRemoteNodeStaticRoutes(ni nodeInfo) error {
 	logicalRouter := nbdb.LogicalRouter{Name: types.OVNClusterRouter}
 	opModels := []libovsdbops.OperationModel{}
 
-	for _, subnet := range ni.nodeSubnets {
+	addRoute := func(subnet *net.IPNet) {
 		logicalRouterStaticRoute := nbdb.LogicalRouterStaticRoute{
 			ExternalIDs: map[string]string{
 				"ic-node": ni.name,
@@ -416,6 +426,14 @@ func (ic *Controller) addRemoteNodeStaticRoutes(ni nodeInfo) error {
 				ErrNotFound: true,
 			},
 		}...)
+	}
+
+	for _, subnet := range ni.nodeSubnets {
+		addRoute(subnet)
+	}
+
+	for _, subnet := range ni.joinSubnets {
+		addRoute(subnet)
 	}
 
 	if _, err := ic.modelNbClient.CreateOrUpdate(opModels...); err != nil {

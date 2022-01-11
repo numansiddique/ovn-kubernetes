@@ -1450,6 +1450,35 @@ func completeGatewayConfig(allSubnets *configSubnets) error {
 	return nil
 }
 
+// FIXME: What we should actually do is implement a join subnet allocator
+// and store a distinct joinSubnet as annotation for each node running in
+// local mode.  Until then just hack around this by reserving
+// joinSubnet + offset.
+func GetJoinSubnets(offset int) ([]*net.IPNet, error) {
+	var joinSubnets []*net.IPNet
+	joinSubnetsConfig := []string{}
+	if IPv4Mode {
+		joinSubnetsConfig = append(joinSubnetsConfig, Gateway.V4JoinSubnet)
+	}
+	if IPv6Mode {
+		joinSubnetsConfig = append(joinSubnetsConfig, Gateway.V6JoinSubnet)
+	}
+	for _, joinSubnetString := range joinSubnetsConfig {
+		_, joinSubnet, err := net.ParseCIDR(joinSubnetString)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing join subnet string %s: %v", joinSubnetString, err)
+		}
+		jsb := utilnet.BigForIP(joinSubnet.IP)
+		js := utilnet.AddIPOffset(jsb, offset*256*256)
+		joinSubnet = &net.IPNet{
+			IP:   js,
+			Mask: joinSubnet.Mask,
+		}
+		joinSubnets = append(joinSubnets, joinSubnet)
+	}
+	return joinSubnets, nil
+}
+
 func buildOVNKubernetesFeatureConfig(ctx *cli.Context, cli, file *config) error {
 	// Copy config file values over default values
 	if err := overrideFields(&OVNKubernetesFeature, &file.OVNKubernetesFeature, &savedOVNKubernetesFeature); err != nil {
