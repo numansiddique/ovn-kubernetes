@@ -11,14 +11,12 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
-	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
@@ -28,12 +26,7 @@ import (
 // and reacting upon the watched resources (e.g. pods, endpoints) on each
 // node configured as a local AZ node.
 type LocalController struct {
-	nodeName     string
-	client       clientset.Interface
-	kube         kube.Interface
-	watchFactory *factory.WatchFactory
-	stopChan     <-chan struct{}
-
+	wg *sync.WaitGroup
 	oc *Controller
 }
 
@@ -47,23 +40,14 @@ func NewLocalOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactor
 	}
 	oc := NewOvnController(ovnClient, wf, stopChan, addressSetFactory, libovsdbOvnNBClient, libovsdbOvnSBClient, recorder, true, nodeName)
 	return &LocalController{
-		nodeName: nodeName,
-		client:   ovnClient.KubeClient,
-		kube: &kube.Kube{
-			KClient:              ovnClient.KubeClient,
-			EIPClient:            ovnClient.EgressIPClient,
-			EgressFirewallClient: ovnClient.EgressFirewallClient,
-			CloudNetworkClient:   ovnClient.CloudNetworkClient,
-		},
-		watchFactory: wf,
-		stopChan:     stopChan,
-		oc:           oc,
+		oc: oc,
 	}
 }
 
 func (lc *LocalController) Start(wg *sync.WaitGroup) error {
 	wg.Add(1)
 	go func() {
+		lc.wg = wg
 		_ = lc.Run(wg)
 		klog.Infof("Stopped local controller")
 		wg.Done()
@@ -77,41 +61,55 @@ func (lc *LocalController) Run(wg *sync.WaitGroup) error {
 	var node *kapi.Node
 	var subnets []*net.IPNet
 
-	// First wait for the node logical switch to be created by the Master, timeout is 300s.
+	nodeName := lc.oc.nodeName
+
+	// First wait for the Master to set all the required annotations, timeout is 300s.
 	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
-		if node, err = lc.kube.GetNode(lc.nodeName); err != nil {
-			klog.Infof("Waiting to retrieve node %s: %v", lc.nodeName, err)
+		node, err = lc.oc.kube.GetNode(nodeName)
+		if err != nil {
+			klog.Infof("Waiting to retrieve node %s: %v", nodeName, err)
 			return false, nil
 		}
-		subnets, err = util.ParseNodeHostSubnetAnnotation(node)
-		if err != nil {
-			klog.Infof("Waiting for node %s to start, no annotation found on node for subnet: %v", lc.nodeName, err)
+		if _, err = util.ParseNodeHostSubnetAnnotation(node); err != nil {
+			klog.Infof("Waiting for node %s to start, no annotation found on node for subnet: %v", nodeName, err)
 			return false, nil
 		}
 		if util.GetNodeId(node) == -1 {
-			klog.Infof("Still waiting for master to annotate nodeId on node %s", lc.nodeName)
+			klog.Infof("Still waiting for master to annotate nodeId on node %s", nodeName)
+			return false, nil
+		}
+		if _, err = util.ParseNodeChassisIDAnnotation(node); err != nil {
+			klog.Infof("Still waiting for master to annotate chassisId on node %s: %v", nodeName, err)
+			return false, nil
+		}
+		if _, err = util.ParseNodeManagementPortMACAddress(node); err != nil {
+			klog.Infof("Still waiting for master to annotate MgmtPortMACAddress on node %s: %v", nodeName, err)
+			return false, nil
+		}
+		if _, err = util.ParseNodeL3GatewayAnnotation(node); err != nil {
+			klog.Infof("Still waiting for master to annotate L3Gateway on node %s: %v", nodeName, err)
 			return false, nil
 		}
 		return true, nil
 	})
 	if err != nil {
-		return fmt.Errorf("timed out waiting for node's: %q logical switch: %v", lc.nodeName, err)
+		return fmt.Errorf("timed out waiting for node's: %q logical switch: %v", nodeName, err)
 	}
 
 	nodeId := util.GetNodeId(node)
 	joinSubnets, err := config.GetJoinSubnets(nodeId)
 	if err != nil {
-		return fmt.Errorf("failed to get join subnets for node %s: %v", lc.nodeName, err)
+		return fmt.Errorf("failed to get join subnets for node %s: %v", nodeName, err)
 	}
 	klog.Infof("Node %s ready for ovn initialization with: host subnet %s join subnet %s",
-		lc.nodeName, util.JoinIPNets(subnets, ","), util.JoinIPNets(joinSubnets, ","))
+		nodeName, util.JoinIPNets(subnets, ","), util.JoinIPNets(joinSubnets, ","))
 
 	err = lc.oc.probeOvnFeatures()
 	if err != nil {
 		return err
 	}
 	// Start and sync the watch factory to begin listening for events
-	if err := lc.watchFactory.Start(); err != nil {
+	if err := lc.oc.watchFactory.Start(); err != nil {
 		return err
 	}
 
@@ -119,29 +117,23 @@ func (lc *LocalController) Run(wg *sync.WaitGroup) error {
 		return err
 	}
 
-	// Start service watch factory and sync services
-	lc.oc.svcFactory.Start(lc.oc.stopChan)
-
-	// Services should be started after nodes to prevent LB churn
-	if err := lc.oc.StartServiceController(wg, true); err != nil {
-		return err
-	}
-
-	klog.Infof("Starting some of the Watchers...")
+	klog.Infof("Starting the node watcher...")
 
 	lc.WatchNodes()
-
 	return nil
 }
 
 func (lc *LocalController) WatchNamespaces() {
 }
 
+// FIXME: We only take care of Node addition.  What if the node annotations
+// change afterwards (e.g., node changes ID or host subnet changes).  We should
+// deal with that too.
 func (lc *LocalController) WatchNodes() {
-	lc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+	lc.oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
-			if node.Name != lc.nodeName {
+			if node.Name != lc.oc.nodeName {
 				// We are only interested in the local node
 				return
 			}
@@ -150,21 +142,28 @@ func (lc *LocalController) WatchNodes() {
 
 			subnets, err := util.ParseNodeHostSubnetAnnotation(node)
 			if err != nil {
-				klog.Infof("Waiting for node %s to start, no annotation found on node for subnet: %v", lc.nodeName, err)
-				return
+				panic(fmt.Sprintf("Failed to find annotation node %s for subnet: %v", lc.oc.nodeName, err))
 			}
 
-			err = lc.oc.SetupMaster(lc.nodeName, make([]string, 0), util.GetNodeId(node))
-            if err != nil {
-                return
-            }
+			err = lc.oc.SetupMaster(lc.oc.nodeName, make([]string, 0), util.GetNodeId(node))
+			if err != nil {
+				panic(fmt.Sprintf("Failed to setup master topology, error: %v", err))
+			}
 
 			err = lc.oc.ensureNodeLogicalNetwork(node, subnets)
 			if err != nil {
-				return
+				panic(fmt.Sprintf("Failed to setup node logical network, error: %v", err))
 			}
 
 			klog.Infof("Starting some more of the Watchers...")
+
+			// Start service watch factory and sync services
+			lc.oc.svcFactory.Start(lc.oc.stopChan)
+
+			// Services should be started after nodes to prevent LB churn
+			if err := lc.oc.StartServiceController(lc.wg, true); err != nil {
+				panic(fmt.Sprintf("Failed to start service controller, error: %v", err))
+			}
 
 			lc.oc.WatchNamespaces()
 
@@ -181,17 +180,11 @@ func (lc *LocalController) WatchNodes() {
 
 			err = lc.oc.syncNodeManagementPort(node, subnets)
 			if err != nil {
-				if !util.IsAnnotationNotSetError(err) {
-					klog.Warningf("Error creating management port for node %s: %v", node.Name, err)
-				}
-				return
+				panic(fmt.Sprintf("Error creating management port for node %s: %v", node.Name, err))
 			}
 
 			if err := lc.oc.syncNodeGateway(node, subnets); err != nil {
-				if !util.IsAnnotationNotSetError(err) {
-					klog.Warningf(err.Error())
-				}
-				return
+				panic(fmt.Sprintf("Error syncing node gateway for node %s: %v", node.Name, err))
 			}
 
 			// ensure pods that already exist on this node have their logical ports created
