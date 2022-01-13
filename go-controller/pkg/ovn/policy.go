@@ -1261,9 +1261,7 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, objs ...in
 		if pod.Spec.NodeName == "" {
 			continue
 		}
-		if oc.isPodRelevant(pod) {
-			pods = append(pods, pod)
-		}
+		pods = append(pods, pod)
 	}
 	// If no IP is found, the pod handler may not have added it by the time the network policy handler
 	// processed this pod event. It will grab it during the pod update event to add the annotation,
@@ -1281,10 +1279,8 @@ func (oc *Controller) handlePeerPodSelectorDelete(gp *gressPolicy, obj interface
 	if pod.Spec.NodeName == "" {
 		return
 	}
-	if oc.isPodRelevant(pod) {
-		if err := gp.deletePeerPod(pod); err != nil {
-			klog.Errorf(err.Error())
-		}
+	if err := gp.deletePeerPod(pod); err != nil {
+		klog.Errorf(err.Error())
 	}
 }
 
