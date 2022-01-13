@@ -678,7 +678,15 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 	}
 
 	if !oc.isPodRelevant(pod) {
-		// Nothing to do.
+		// Track remote pods too, for network policy.
+		if annotation, err := util.UnmarshalPodAnnotation(pod.Annotations); err != nil {
+			klog.Infof("Failed to get non-local pod %s annotations: %v", pod.Name, err)
+		} else {
+			if err = oc.addRemotePodToNamespace(pod.Namespace, annotation.IPs); err != nil {
+				klog.Infof("Failed to add non-local pod %s to namespace: %v", pod.Name, err)
+				return false
+			}
+		}
 		return true
 	}
 
@@ -783,6 +791,15 @@ func (oc *Controller) WatchPods() {
 				}
 				// deleteLogicalPort will take care of removing exgw for ovn networked pods
 				oc.deleteLogicalPort(pod)
+			} else {
+				// Untrack remote pods too, for network policy.
+				if annotation, err := util.UnmarshalPodAnnotation(pod.Annotations); err != nil {
+					klog.Infof("Failed to get non-local pod %s annotations: %v", pod.Name, err)
+				} else {
+					if err = oc.deleteRemotePodFromNamespace(pod.Namespace, annotation.IPs); err != nil {
+						klog.Infof("Failed to delete non-local pod %s from namespace: %v", pod.Name, err)
+					}
+				}
 			}
 		},
 	}, oc.syncPods)
