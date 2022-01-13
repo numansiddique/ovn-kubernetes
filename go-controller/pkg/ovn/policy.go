@@ -1193,9 +1193,7 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, objs ...in
 		if pod.Spec.NodeName == "" {
 			continue
 		}
-		if oc.isPodRelevant(pod) {
-			pods = append(pods, pod)
-		}
+		pods = append(pods, pod)
 	}
 	if err := gp.addPeerPods(pods...); err != nil {
 		klog.Errorf(err.Error())
@@ -1210,10 +1208,8 @@ func (oc *Controller) handlePeerPodSelectorDelete(gp *gressPolicy, obj interface
 	if pod.Spec.NodeName == "" {
 		return
 	}
-	if oc.isPodRelevant(pod) {
-		if err := gp.deletePeerPod(pod); err != nil {
-			klog.Errorf(err.Error())
-		}
+	if err := gp.deletePeerPod(pod); err != nil {
+		klog.Errorf(err.Error())
 	}
 }
 
