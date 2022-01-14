@@ -678,9 +678,17 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 	}
 
 	if !oc.isPodRelevant(pod) {
-		// Track remote pods too, for network policy.
+		// Skip host-networked pods, or the ones that have already been
+		// processed and are now just updated.
+		if !util.PodWantsNetwork(pod) || !addPort {
+			return true
+		}
+
+		// Track remote ovn networked pods too, for network policy.
 		if annotation, err := util.UnmarshalPodAnnotation(pod.Annotations); err != nil {
-			klog.Infof("Failed to get non-local pod %s annotations: %v", pod.Name, err)
+			klog.Infof("Failed to get non-local pod %s annotations to add to namespace, will retry: %v",
+				pod.Name, err)
+			return false
 		} else {
 			if err = oc.addRemotePodToNamespace(pod.Namespace, annotation.IPs); err != nil {
 				klog.Infof("Failed to add non-local pod %s to namespace: %v", pod.Name, err)
@@ -791,10 +799,11 @@ func (oc *Controller) WatchPods() {
 				}
 				// deleteLogicalPort will take care of removing exgw for ovn networked pods
 				oc.deleteLogicalPort(pod)
-			} else {
+			} else if util.PodWantsNetwork(pod) {
 				// Untrack remote pods too, for network policy.
 				if annotation, err := util.UnmarshalPodAnnotation(pod.Annotations); err != nil {
-					klog.Infof("Failed to get non-local pod %s annotations: %v", pod.Name, err)
+					klog.Infof("Failed to get non-local pod %s annotations to delete from namespace: %v",
+						pod.Name, err)
 				} else {
 					if err = oc.deleteRemotePodFromNamespace(pod.Namespace, annotation.IPs); err != nil {
 						klog.Infof("Failed to delete non-local pod %s from namespace: %v", pod.Name, err)
