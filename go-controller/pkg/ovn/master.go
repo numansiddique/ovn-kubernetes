@@ -538,24 +538,37 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 
 		if config.Gateway.Mode == config.GatewayModeLocal {
 			logicalRouter := nbdb.LogicalRouter{}
-			logicalRouterStaticRoutes := nbdb.LogicalRouterStaticRoute{
-				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-				IPPrefix: hostSubnet.String(),
-				Nexthop:  mgmtIfAddr.IP.String(),
+
+			// When running in local mode (interconnect-mode) jsut add a plain
+			// default route.  Otherwise add a policy=src-ip route to move all
+			// the traffic originated on the local node via the mgmt port.
+			logicalRouterStaticRoute := nbdb.LogicalRouterStaticRoute{
+				Nexthop: mgmtIfAddr.IP.String(),
+			}
+			if oc.local {
+				logicalRouterStaticRoute.Policy = &nbdb.LogicalRouterStaticRoutePolicyDstIP
+				if utilnet.IsIPv6CIDR(hostSubnet) {
+					logicalRouterStaticRoute.IPPrefix = "::/0"
+				} else {
+					logicalRouterStaticRoute.IPPrefix = "0.0.0.0/0"
+				}
+			} else {
+				logicalRouterStaticRoute.Policy = &nbdb.LogicalRouterStaticRoutePolicySrcIP
+				logicalRouterStaticRoute.IPPrefix = hostSubnet.String()
 			}
 			opModels := []libovsdbops.OperationModel{
 				{
-					Model: &logicalRouterStaticRoutes,
+					Model: &logicalRouterStaticRoute,
 					ModelPredicate: func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
 						return lrsr.IPPrefix == hostSubnet.String() && lrsr.Nexthop == mgmtIfAddr.IP.String()
 					},
 					OnModelUpdates: []interface{}{
-						&logicalRouterStaticRoutes.Nexthop,
-						&logicalRouterStaticRoutes.IPPrefix,
+						&logicalRouterStaticRoute.Nexthop,
+						&logicalRouterStaticRoute.IPPrefix,
 					},
 					DoAfter: func() {
-						if logicalRouterStaticRoutes.UUID != "" {
-							logicalRouter.StaticRoutes = []string{logicalRouterStaticRoutes.UUID}
+						if logicalRouterStaticRoute.UUID != "" {
+							logicalRouter.StaticRoutes = []string{logicalRouterStaticRoute.UUID}
 						}
 					},
 				},
