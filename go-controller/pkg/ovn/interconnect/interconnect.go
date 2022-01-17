@@ -311,6 +311,9 @@ func (ic *Controller) addNodeLogicalSwitchPort(logicalSwitchName, portName, port
 			Model: &logicalSwitchPort,
 			OnModelUpdates: []interface{}{
 				&logicalSwitchPort.Addresses,
+				&logicalSwitchPort.Type,
+				&logicalSwitchPort.Options,
+				&logicalSwitchPort.Addresses,
 			},
 			DoAfter: func() {
 				logicalSwitch.Ports = []string{logicalSwitchPort.UUID}
