@@ -252,8 +252,10 @@ func (ic *Controller) createLocalAzNodeResources(ni nodeInfo) error {
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name: types.TransitSwitch,
 		OtherConfig: map[string]string{
-			"interconn-ts":      types.TransitSwitch,
-			"requested-tnl-key": transitSwitchTunnelKey,
+			"interconn-ts":             types.TransitSwitch,
+			"requested-tnl-key":        transitSwitchTunnelKey,
+			"mcast_snoop":              "true",
+			"mcast_flood_unregistered": "true",
 		},
 	}
 
@@ -262,6 +264,9 @@ func (ic *Controller) createLocalAzNodeResources(ni nodeInfo) error {
 		Name:     logicalRouterPortName,
 		MAC:      ni.tsMac.String(),
 		Networks: []string{ni.tsNet},
+		Options: map[string]string{
+			"mcast_flood": "true",
+		},
 	}
 	logicalRouter := nbdb.LogicalRouter{}
 	opModels := []libovsdbops.OperationModel{
@@ -270,6 +275,7 @@ func (ic *Controller) createLocalAzNodeResources(ni nodeInfo) error {
 			OnModelUpdates: []interface{}{
 				&logicalRouterPort.Networks,
 				&logicalRouterPort.MAC,
+				&logicalRouterPort.Options,
 			},
 			DoAfter: func() {
 				logicalRouter.Ports = []string{logicalRouterPort.UUID}
