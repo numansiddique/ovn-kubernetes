@@ -254,6 +254,7 @@ jobs:
             # hybrid-overlay = multicast-enable = emptylb-enable = true
           - "control-plane"
         ha: ["HA", "noHA"]
+        az: ["local", "noLocal"]
         disable-snat-multiple-gws: ["noSnatGW", "snatGW"]
         gateway-mode: ["local", "shared"]
         second-bridge: ["2br", "1br"]
@@ -293,6 +294,7 @@ jobs:
       OVN_SECOND_BRIDGE: "${{ matrix.second-bridge == '2br' }}"
       KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
+      OVN_LOCAL_AZ_SUPPORT: "${{ matrix.az == 'local' }}"
     steps:
 
     - name: Free up disk space
