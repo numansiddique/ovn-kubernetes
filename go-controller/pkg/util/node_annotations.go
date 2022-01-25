@@ -9,6 +9,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -71,6 +72,7 @@ const (
 
 	ovnNodeAzName = "k8s.ovn.org/ovn-az-name"
 	OvnNodeId     = "k8s.ovn.org/ovn-node-id"
+	ovnGRIPs      = "k8s.ovn.org/ovn-gr-ips"
 )
 
 type L3GatewayConfig struct {
@@ -531,4 +533,46 @@ func GetNodeId(node *kapi.Node) int {
 
 func SetNodeId(nodeAnnotator kube.Annotator, id int) error {
 	return nodeAnnotator.Set(OvnNodeId, strconv.Itoa(id))
+}
+
+func CreateNodeGRIPsAnnotation(ips []*net.IPNet) (map[string]interface{}, error) {
+	ipaddrStrs := make([]string, len(ips))
+	for i, ip := range ips {
+		var prefixLen int
+		if utilnet.IsIPv6CIDR(ip) {
+			prefixLen = 128
+		} else {
+			prefixLen = 32
+		}
+		ipaddrStrs[i] = fmt.Sprintf("%s/%d", ip.IP, prefixLen)
+	}
+	bytes, err := json.Marshal(ipaddrStrs)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		ovnGRIPs: string(bytes),
+	}, nil
+}
+
+func ParseNodeGRIPsAnnotation(node *kapi.Node) ([]*net.IPNet, error) {
+	annotation, ok := node.Annotations[ovnGRIPs]
+	if !ok {
+		return nil, newAnnotationNotSetError("node %q has no %s annotation", node.Name, ovnGRIPs)
+	}
+
+	var ipaddrStrs []string
+	if err := json.Unmarshal([]byte(annotation), &ipaddrStrs); err != nil {
+		return nil, fmt.Errorf("error unmarshalling %q value: %v", ovnGRIPs, err)
+	}
+
+	var ips []*net.IPNet
+	for _, ipStr := range ipaddrStrs {
+		_, ip, err := net.ParseCIDR(ipStr)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing %q value: %v", ovnGRIPs, err)
+		}
+		ips = append(ips, ip)
+	}
+	return ips, nil
 }

@@ -49,6 +49,7 @@ type nodeInfo struct {
 
 	nodeSubnets   []*net.IPNet
 	joinSubnets   []*net.IPNet
+	nodeGRIPs     []*net.IPNet
 	chassisID     string
 	nodePrimaryIp string
 }
@@ -218,6 +219,12 @@ func (ic *Controller) updateNodeInfo(node *v1.Node, nodeId int) {
 		return
 	}
 
+	nodeGRIPs, err := util.ParseNodeGRIPsAnnotation(node)
+	if err != nil {
+		klog.Infof("Failed to parse node %s GR IPs annotation %v", node.Name, err)
+		return
+	}
+
 	joinSubnets, err := config.GetJoinSubnets(nodeId)
 	if err != nil {
 		klog.Infof("Failed to parse node %s join subnets annotation %v", node.Name, err)
@@ -235,6 +242,7 @@ func (ic *Controller) updateNodeInfo(node *v1.Node, nodeId int) {
 		nodeSubnets:    nodeSubnets,
 		nodePrimaryIp:  nodePrimaryIp,
 		joinSubnets:    joinSubnets,
+		nodeGRIPs:      nodeGRIPs,
 	}
 
 	ic.Lock()
@@ -455,6 +463,10 @@ func (ic *Controller) addRemoteNodeStaticRoutes(ni nodeInfo) error {
 	}
 
 	for _, subnet := range ni.joinSubnets {
+		addRoute(subnet)
+	}
+
+	for _, subnet := range ni.nodeGRIPs {
 		addRoute(subnet)
 	}
 
