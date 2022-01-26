@@ -262,8 +262,6 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		return err
 	}
 
-	// Store master Node ID.
-	oc.storeNodeId(masterNodeName, types.GlobalAzID)
 	if err := oc.SetupMaster(masterNodeName, nodeNames, types.GlobalAzID); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
@@ -1446,7 +1444,7 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 }
 
 func (oc *Controller) storeNodeId(nodeName string, nodeId int) {
-	klog.Infof("syncNodeAz : Setting Id for node %q in annotations and cache", nodeName)
+	klog.Infof("syncNodeAz : Setting Id [%d] for node %q in annotations and cache", nodeId, nodeName)
 	_ = oc.kube.SetAnnotationsOnNode(nodeName, map[string]interface{}{util.OvnNodeId: strconv.Itoa(nodeId)})
 	oc.azIdCache[nodeName] = nodeId
 }
@@ -1474,18 +1472,33 @@ func (oc *Controller) syncNodeId(node *kapi.Node, deleted bool) error {
 
 	klog.Infof("syncNodeAzId got lock for node %q", node.Name)
 
-	// First try the cache.
-	nodeId, ok := oc.azIdCache[node.Name]
-	if ok {
-		klog.Infof("syncNodeAzId found node %q in cache with ID %d", node.Name, nodeId)
-	} else {
-		// Next try kube annotations.
-		nodeId = util.GetNodeId(node)
+	nodeId := util.GetNodeId(node)
+	if deleted {
+		if nodeId != -1 {
+			oc.removeNodeId(node.Name, nodeId)
+		}
+		return nil
 	}
 
-	klog.Infof("syncNodeAzId node %q ID %d", node.Name, nodeId)
+	nodeIdInCache, ok := oc.azIdCache[node.Name]
+	if ok {
+		klog.Infof("syncNodeAzId found node %q in cache with ID %d", node.Name, nodeIdInCache)
+	} else {
+		nodeIdInCache = -1
+	}
 
-	if nodeId == -1 {
+	if nodeIdInCache != -1 && nodeId != nodeIdInCache {
+		oc.storeNodeId(node.Name, nodeIdInCache)
+		return nil
+	}
+
+	if nodeIdInCache == -1 && nodeId != -1 {
+		oc.azIdCache[node.Name] = nodeId
+		return nil
+	}
+
+	// We need to allocate the node id.
+	if nodeIdInCache == -1 && nodeId == -1 {
 		nodeId, allocated, _ := oc.azIdBitmap.AllocateNext()
 		klog.Infof("syncNodeAz Id allocated for node %q is %d", node.Name, nodeId)
 		if allocated {
@@ -1494,8 +1507,6 @@ func (oc *Controller) syncNodeId(node *kapi.Node, deleted bool) error {
 			klog.Infof("syncNodeAz failed to allocate ID for node %q", node.Name)
 			oc.removeNodeId(node.Name, -1)
 		}
-	} else if deleted {
-		oc.removeNodeId(node.Name, nodeId)
 	}
 
 	return nil
