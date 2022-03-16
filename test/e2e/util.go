@@ -546,25 +546,38 @@ func waitClusterHealthy(f *framework.Framework, numMasters int) error {
 
 		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
 		// Ensure all nodes are running and healthy
-		podList, err := podClient.List(context.Background(), metav1.ListOptions{
+		podNodeList, err := podClient.List(context.Background(), metav1.ListOptions{
 			LabelSelector: "app=ovnkube-node",
 		})
 		if err != nil {
 			return false, fmt.Errorf("failed to list ovn-kube node pods: %w", err)
 		}
-		if len(podList.Items) != numNodes {
-			framework.Logf("Not enough running ovnkube-node pods, want %d, have %d", numNodes, len(podList.Items))
+		podLocalList, err := podClient.List(context.Background(), metav1.ListOptions{
+			LabelSelector: "app=ovnkube-local",
+		})
+		if err != nil {
+			return false, fmt.Errorf("failed to list ovn-kube local pods: %w", err)
+		}
+		if len(podNodeList.Items)+len(podLocalList.Items) != numNodes {
+			framework.Logf("Not enough running ovnkube-node pods, want %d, have %d", numNodes, len(podNodeList.Items)+len(podLocalList.Items))
 			return false, nil
 		}
 
-		for _, pod := range podList.Items {
+		for _, pod := range podNodeList.Items {
 			if ready, err := testutils.PodRunningReady(&pod); !ready {
 				framework.Logf("%v", err)
 				return false, nil
 			}
 		}
 
-		podList, err = podClient.List(context.Background(), metav1.ListOptions{
+		for _, pod := range podLocalList.Items {
+			if ready, err := testutils.PodRunningReady(&pod); !ready {
+				framework.Logf("%v", err)
+				return false, nil
+			}
+		}
+
+		podList, err := podClient.List(context.Background(), metav1.ListOptions{
 			LabelSelector: "name=ovnkube-master",
 		})
 		if err != nil {

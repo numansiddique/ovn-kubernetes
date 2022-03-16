@@ -696,21 +696,35 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 	}
 
 	if !oc.isPodRelevant(pod) {
-		// Skip host-networked pods, or the ones that have already been
-		// processed and are now just updated.
-		if !util.PodWantsNetwork(pod) || !addPort {
-			return true
-		}
-
-		// Track remote ovn networked pods too, for network policy.
+		// Track remote ovn networked pods too, for network policy, and egress gw.
 		if annotation, err := util.UnmarshalPodAnnotation(pod.Annotations); err != nil {
 			klog.Infof("Failed to get non-local pod %s annotations to add to namespace, will retry: %v",
 				pod.Name, err)
 			return false
 		} else {
-			if err = oc.addRemotePodToNamespace(pod.Namespace, annotation.IPs); err != nil {
-				klog.Infof("Failed to add non-local pod %s to namespace: %v", pod.Name, err)
-				return false
+			if addPort && util.PodWantsNetwork(pod) {
+				if err = oc.addRemotePodToNamespace(pod.Namespace, annotation.IPs); err != nil {
+					klog.Infof("Failed to add non-local pod %s to namespace: %v", pod.Name, err)
+					return false
+				}
+			}
+
+			//FIXME: Update comments & reduce code duplication.
+			// check if this pod is serving as an external GW
+			if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
+				// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
+				// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
+				// care of updating the exgw updates
+				oc.deletePodExternalGW(oldPod)
+			}
+
+			// either pod is host-networked or its an update for a normal pod (addPort=false case)
+			if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
+				if err := oc.addPodExternalGW(pod); err != nil {
+					klog.Errorf(err.Error())
+					oc.recordPodEvent(err, pod)
+					return false
+				}
 			}
 		}
 		return true

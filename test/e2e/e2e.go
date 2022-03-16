@@ -412,7 +412,7 @@ func runCommand(cmd ...string) (string, error) {
 
 // restartOVNKubeNodePod restarts the ovnkube-node pod from namespace, running on nodeName
 func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nodeName string) error {
-	ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
+	ovnkubePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
 		LabelSelector: "name=ovnkube-node",
 		FieldSelector: "spec.nodeName=" + nodeName,
 	})
@@ -420,10 +420,22 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 		return fmt.Errorf("could not get ovnkube-node pods: %w", err)
 	}
 
-	if len(ovnKubeNodePods.Items) <= 0 {
-		return fmt.Errorf("could not find ovnkube-node pod running on node %s", nodeName)
+	if len(ovnkubePods.Items) <= 0 {
+		framework.Logf("could not find ovnkube-node pod running on node %s, trying ovnkube-local", nodeName)
+
+		ovnkubePods, err = clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
+			LabelSelector: "name=ovnkube-local",
+			FieldSelector: "spec.nodeName=" + nodeName,
+		})
+		if err != nil {
+			return fmt.Errorf("could not get ovnkube-local pods: %w", err)
+		}
+
+		if len(ovnkubePods.Items) <= 0 {
+			return fmt.Errorf("could not find ovnkube-local pod running on node %s", nodeName)
+		}
 	}
-	for _, pod := range ovnKubeNodePods.Items {
+	for _, pod := range ovnkubePods.Items {
 		if err := e2epod.DeletePodWithWait(clientset, &pod); err != nil {
 			return fmt.Errorf("could not delete ovnkube-node pod on node %s: %w", nodeName, err)
 		}
@@ -431,7 +443,7 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 
 	framework.Logf("waiting for node %s to have running ovnkube-node pod", nodeName)
 	wait.Poll(2*time.Second, 5*time.Minute, func() (bool, error) {
-		ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
+		ovnkubePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
 			LabelSelector: "name=ovnkube-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
 		})
@@ -439,11 +451,25 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 			return false, fmt.Errorf("could not get ovnkube-node pods: %w", err)
 		}
 
-		if len(ovnKubeNodePods.Items) <= 0 {
-			framework.Logf("Node %s has no ovnkube-node pod yet", nodeName)
-			return false, nil
+		if len(ovnkubePods.Items) <= 0 {
+			framework.Logf("could not find ovnkube-node pod running on node %s, trying ovnkube-local", nodeName)
+
+			ovnkubePods, err = clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
+				LabelSelector: "name=ovnkube-local",
+				FieldSelector: "spec.nodeName=" + nodeName,
+			})
+			if err != nil {
+				framework.Logf("could not get ovnkube-local pods: %w", err)
+				return false, nil
+			}
+
+			if len(ovnkubePods.Items) <= 0 {
+				framework.Logf("Node %s has no ovnkube-node or ovnkube-local pod yet", nodeName)
+				return false, nil
+			}
 		}
-		for _, pod := range ovnKubeNodePods.Items {
+
+		for _, pod := range ovnkubePods.Items {
 			if ready, err := testutils.PodRunningReady(&pod); !ready {
 				framework.Logf("%v", err)
 				return false, nil

@@ -7,11 +7,14 @@ import (
 	"sync"
 	"time"
 
+	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -120,6 +123,66 @@ func (lc *LocalController) Run(wg *sync.WaitGroup) error {
 	klog.Infof("Starting the node watcher...")
 
 	lc.WatchNodes()
+
+	klog.Infof("Starting the egress IP watchers...")
+	if config.OVNKubernetesFeature.EnableEgressIP {
+		// This is probably the best starting order for all egress IP handlers.
+		// WatchEgressIPNamespaces and WatchEgressIPPods only use the informer
+		// cache to retrieve the egress IPs when determining if namespace/pods
+		// match. It is thus better if we initialize them first and allow
+		// WatchEgressNodes / WatchEgressIP to initialize after. Those handlers
+		// might change the assignments of the existing objects. If we do the
+		// inverse and start WatchEgressIPNamespaces / WatchEgressIPPod last, we
+		// risk performing a bunch of modifications on the EgressIP objects when
+		// we restart and then have these handlers act on stale data when they
+		// sync.
+		lc.oc.WatchEgressIPNamespaces()
+		lc.oc.WatchEgressIPPods()
+		lc.oc.WatchEgressNodes()
+		lc.oc.WatchEgressIP()
+		if util.PlatformTypeIsEgressIPCloudProvider() {
+			lc.oc.WatchCloudPrivateIPConfig()
+		}
+	}
+
+	klog.Infof("Starting the egress Firewall...")
+	if config.OVNKubernetesFeature.EnableEgressFirewall {
+		var err error
+		lc.oc.egressFirewallDNS, err = NewEgressDNS(lc.oc.addressSetFactory, lc.oc.stopChan)
+		if err != nil {
+			panic(fmt.Sprintf("Error creating egress firewall DNS for node %s: %v", node.Name, err))
+		}
+		lc.oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
+		lc.oc.egressFirewallHandler = lc.oc.WatchEgressFirewall()
+	}
+
+	klog.Infof("Starting the unidling controller...")
+	if config.Kubernetes.OVNEmptyLbEvents {
+		klog.Infof("Starting unidling controller")
+		unidlingController, err := unidling.NewController(
+			lc.oc.recorder,
+			lc.oc.watchFactory.ServiceInformer(),
+			lc.oc.sbClient,
+		)
+		if err != nil {
+			return err
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			unidlingController.Run(lc.oc.stopChan)
+		}()
+	}
+
+	klog.Infof("Starting the hybrid overlay controller...")
+	if lc.oc.hoMaster != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			lc.oc.hoMaster.Run(lc.oc.stopChan)
+		}()
+	}
+
 	return nil
 }
 
@@ -195,6 +258,22 @@ func (lc *LocalController) WatchNodes() {
 			} else {
 				lc.oc.addRetryPods(pods.Items)
 				lc.oc.requestRetryPods()
+			}
+
+			// Start Hybrid Overlay
+			if config.HybridOverlay.Enabled {
+				lc.oc.hoMaster, err = hocontroller.NewMaster(
+					lc.oc.kube,
+					lc.oc.watchFactory.NodeInformer(),
+					lc.oc.watchFactory.NamespaceInformer(),
+					lc.oc.watchFactory.PodInformer(),
+					lc.oc.nbClient,
+					lc.oc.sbClient,
+					informer.NewDefaultEventHandler,
+				)
+				if err != nil {
+					klog.Errorf("Failed to set up hybrid overlay master: %v", err)
+				}
 			}
 		},
 		UpdateFunc: func(old, new interface{}) {
