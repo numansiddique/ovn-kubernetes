@@ -76,6 +76,7 @@ OVN_HOST_NETWORK_NAMESPACE=""
 OVN_EX_GW_NETWORK_INTERFACE=""
 OVNKUBE_NODE_MGMT_PORT_NETDEV=""
 OVNKUBE_CONFIG_DURATION_ENABLE=
+OVN_CLUSTER_MANAGER_MODE="inmaster"
 # IN_UPGRADE is true only if called by upgrade-ovn.sh during the upgrade test,
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
 IN_UPGRADE=
@@ -99,6 +100,9 @@ while [ "$1" != "" ]; do
     ;;
   --gateway-options)
     OVN_GATEWAY_OPTS=$VALUE
+    ;;
+  --ovn-cluster-manager-mode)
+    OVN_CLUSTER_MANAGER_MODE=$VALUE
     ;;
   --ovn-monitor-all)
     OVN_MONITOR_ALL=$VALUE
@@ -393,6 +397,8 @@ ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV}
 echo "ovnkube_node_mgmt_port_netdev: ${ovnkube_node_mgmt_port_netdev}"
 ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE}
 echo "ovnkube_config_duration_enable: ${ovnkube_config_duration_enable}"
+ovn_cluster_manager_mode=${OVN_CLUSTER_MANAGER_MODE}
+echo "ovn_cluster_manager_mode: ${OVN_CLUSTER_MANAGER_MODE}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -489,7 +495,34 @@ ovn_image=${image} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_cluster_manager_mode=${ovn_cluster_manager_mode} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovnkube_master_loglevel=${master_loglevel} \
+  ovn_loglevel_northd=${ovn_loglevel_northd} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
+  ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
+  ovn_empty_lb_events=${ovn_empty_lb_events} \
+  ovn_v4_join_subnet=${ovn_v4_join_subnet} \
+  ovn_v6_join_subnet=${ovn_v6_join_subnet} \
+  ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
+  ovn_egress_qos_enable=${ovn_egress_qos_enable} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  ovn_cluster_manager_count=${ovn_master_count} \
+  ovn_gateway_mode=${ovn_gateway_mode} \
+  ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  j2 ../templates/ovnkube-cluster-manager.yaml.j2 -o ${output_dir}/ovnkube-cluster-manager.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
