@@ -337,6 +337,7 @@ print_params() {
      echo "OVN_ENABLE_EX_GW_NETWORK_BRIDGE = $OVN_ENABLE_EX_GW_NETWORK_BRIDGE"
      echo "OVN_EX_GW_NETWORK_INTERFACE = $OVN_EX_GW_NETWORK_INTERFACE"
      echo "OVN_EGRESSIP_HEALTHCHECK_PORT = $OVN_EGRESSIP_HEALTHCHECK_PORT"
+     echo "OVN_CLUSTER_MANAGER_MODE = $OVN_CLUSTER_MANAGER_MODE"
      echo ""
 }
 
@@ -404,6 +405,7 @@ set_default_params() {
   KIND_IMAGE=${KIND_IMAGE:-kindest/node}
   K8S_VERSION=${K8S_VERSION:-v1.24.0}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
+  OVN_CLUSTER_MANAGER_MODE=${OVN_CLUSTER_MANAGER_MODE:-"inmaster"}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   OVN_HA=${OVN_HA:-false}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
@@ -633,6 +635,7 @@ create_ovn_kube_manifests() {
     --net-cidr="${NET_CIDR}" \
     --svc-cidr="${SVC_CIDR}" \
     --gateway-mode="${OVN_GATEWAY_MODE}" \
+    --ovn-cluster-manager-mode="${OVN_CLUSTER_MANAGER_MODE}" \
     --hybrid-enabled="${OVN_HYBRID_OVERLAY_ENABLE}" \
     --disable-snat-multiple-gws="${OVN_DISABLE_SNAT_MULTIPLE_GWS}" \
     --disable-pkt-mtu-check="${OVN_DISABLE_PKT_MTU_CHECK}" \
@@ -704,6 +707,9 @@ install_ovn() {
   run_kubectl apply -f ovs-node.yaml
   run_kubectl apply -f ovnkube-master.yaml
   run_kubectl apply -f ovnkube-node.yaml
+  if [ "$OVN_CLUSTER_MANAGER_MODE" ==  "service" ]; then
+    run_kubectl apply -f ovnkube-cluster-manager.yaml
+  fi
   popd
 }
 
