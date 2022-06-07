@@ -70,7 +70,7 @@ type networkControllerManager struct {
 	defaultNetworkController BaseNetworkController
 
 	// net-attach-def controller handle net-attach-def and create/delete network controllers
-	nadController *netAttachDefinitionController
+	nadController *NetAttachDefinitionController
 }
 
 func (cm *networkControllerManager) NewNetworkController(nInfo util.NetInfo,
@@ -285,7 +285,7 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
 		klog.Infof("Multiple network supported, creating %s", controllerName)
-		cm.nadController = newNetAttachDefinitionController(cm, cm.ovnClientset, cm.recorder)
+		cm.nadController = NewNetAttachDefinitionController(cm, cm.ovnClientset, cm.recorder)
 	}
 	return cm
 }

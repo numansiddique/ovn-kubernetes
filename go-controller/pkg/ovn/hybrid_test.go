@@ -16,6 +16,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	cm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -128,12 +129,15 @@ func setupHybridOverlayOVNObjects(node tNode, hoSubnet, nodeHOIP, nodeHOMAC stri
 
 }
 
-func setupClusterController(clusterController *DefaultNetworkController, clusterLBUUID, expectedNodeSwitchUUID, node1Name string) {
-	err := clusterController.hybridOverlaySubnetAllocator.InitRanges(config.HybridOverlay.ClusterSubnets)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	err = clusterController.masterSubnetAllocator.InitRanges(config.Default.ClusterSubnets)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+func setupClusterController(clusterManager *cm.ClusterManager, clusterController *DefaultNetworkController, clusterLBUUID, expectedNodeSwitchUUID, node1Name string) {
+	var err error
+	if clusterManager != nil {
+		if config.HybridOverlay.ClusterSubnets != nil {
+			clusterManager.InitHybridOverlaySubnetAllocatorRanges(config.HybridOverlay.ClusterSubnets)
+		}
 
+		clusterManager.InitSubnetAllocatorRanges(config.Default.ClusterSubnets)
+	}
 	clusterController.SCTPSupport = true
 	clusterController.loadBalancerGroupUUID = clusterLBUUID
 	clusterController.defaultCOPPUUID, err = EnsureDefaultCOPP(clusterController.nbClient)
@@ -226,10 +230,15 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			err = clusterController.hybridOverlaySubnetAllocator.InitRanges(config.HybridOverlay.ClusterSubnets)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			clusterManager := cm.NewClusterManager(fakeClient, f, stopChan, wg,
+				record.NewFakeRecorder(0))
+			if config.HybridOverlay.ClusterSubnets != nil {
+				clusterManager.InitHybridOverlaySubnetAllocatorRanges(config.HybridOverlay.ClusterSubnets)
+			}
 
 			// Let the real code run and ensure OVN database sync
+			gomega.Expect(clusterManager.WatchNodes()).To(gomega.Succeed())
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
 			// Windows node should be allocated a subnet
@@ -381,13 +390,17 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+			clusterManager := cm.NewClusterManager(fakeClient, f, stopChan, wg,
+				record.NewFakeRecorder(0))
+			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+			setupClusterController(clusterManager, clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
 			//assuming all the pods have finished processing
 			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
 			// Let the real code run and ensure OVN database sync
+			gomega.Expect(clusterManager.WatchNodes()).To(gomega.Succeed())
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
 			gomega.Eventually(func() (map[string]string, error) {
@@ -682,7 +695,10 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+			clusterManager := cm.NewClusterManager(fakeClient, f, stopChan, wg,
+				record.NewFakeRecorder(0))
+			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+			setupClusterController(clusterManager, clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
@@ -691,6 +707,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			//assuming all the pods have finished processing
 			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
 			// Let the real code run and ensure OVN database sync
+			gomega.Expect(clusterManager.WatchNodes()).To(gomega.Succeed())
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
 			gomega.Eventually(func() (map[string]string, error) {
@@ -846,13 +863,17 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+			clusterManager := cm.NewClusterManager(fakeClient, f, stopChan, wg,
+				record.NewFakeRecorder(0))
+			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+			setupClusterController(clusterManager, clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
 			//assuming all the pods have finished processing
 			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
 			// Let the real code run and ensure OVN database sync
+			gomega.Expect(clusterManager.WatchNodes()).To(gomega.Succeed())
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
 			gomega.Eventually(func() (map[string]string, error) {
@@ -1107,7 +1128,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(10), wg)
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+			setupClusterController(nil, clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 

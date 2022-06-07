@@ -25,36 +25,13 @@ import (
 // hybridOverlayNodeEnsureSubnet allocates a subnet and sets the
 // hybrid overlay subnet annotation. It returns any newly allocated subnet
 // or an error. If an error occurs, the newly allocated subnet will be released.
-func (oc *DefaultNetworkController) hybridOverlayNodeEnsureSubnet(node *kapi.Node, annotator kube.Annotator) (*net.IPNet, error) {
-	var existingSubnets []*net.IPNet
-
+func (oc *DefaultNetworkController) hybridOverlayNodeEnsureSubnet(node *kapi.Node) (*net.IPNet, error) {
 	// Do not allocate a subnet if the node already has one
-	subnet, err := houtil.ParseHybridOverlayHostSubnet(node)
-	if err != nil {
-		// Log the error and try to allocate new subnets
-		klog.Infof("Failed to get node %s hybrid overlay subnet annotation: %v", node.Name, err)
-	} else if subnet != nil {
-		existingSubnets = []*net.IPNet{subnet}
+	if subnet, _ := houtil.ParseHybridOverlayHostSubnet(node); subnet != nil {
+		return subnet, nil
 	}
 
-	// Allocate a new host subnet for this node
-	// FIXME: hybrid overlay is only IPv4 for now due to limitations on the Windows side
-	hostSubnets, allocatedSubnets, err := oc.hybridOverlaySubnetAllocator.AllocateNodeSubnets(node.Name, existingSubnets, true, false)
-	if err != nil {
-		return nil, fmt.Errorf("error allocating hybrid overlay HostSubnet for node %s: %v", node.Name, err)
-	}
-
-	if err := annotator.Set(types.HybridOverlayNodeSubnet, hostSubnets[0].String()); err != nil {
-		_ = oc.hybridOverlaySubnetAllocator.ReleaseNodeSubnets(node.Name, allocatedSubnets...)
-		return nil, err
-	}
-
-	return hostSubnets[0], nil
-}
-
-func (oc *DefaultNetworkController) releaseHybridOverlayNodeSubnet(nodeName string) {
-	oc.hybridOverlaySubnetAllocator.ReleaseAllNodeSubnets(nodeName)
-	klog.Infof("Deleted hybrid overlay HostSubnets for node %s", nodeName)
+	return nil, fmt.Errorf("no hybrid overlay HostSubnet found for node %s", node.Name)
 }
 
 // handleHybridOverlayPort reconciles the node's overlay port with OVN.
