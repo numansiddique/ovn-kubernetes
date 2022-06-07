@@ -20,6 +20,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/urfave/cli/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
@@ -199,11 +200,12 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 
 	master := ctx.String("init-master")
 	node := ctx.String("init-node")
+	clusterManager := ctx.String("init-cluster-manager")
 
 	cleanupNode := ctx.String("cleanup-node")
 	if cleanupNode != "" {
-		if master != "" || node != "" {
-			return fmt.Errorf("cannot specify cleanup-node together with 'init-node or 'init-master'")
+		if master != "" || node != "" || clusterManager != "" {
+			return fmt.Errorf("cannot specify cleanup-node together with 'init-node or 'init-master or init-cluster-manager'")
 		}
 
 		if err = ovnnode.CleanupClusterNode(cleanupNode); err != nil {
@@ -212,8 +214,12 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		return nil
 	}
 
-	if master == "" && node == "" {
-		return fmt.Errorf("need to run ovnkube in either master and/or node mode")
+	if master == "" && node == "" && clusterManager == "" {
+		return fmt.Errorf("need to run ovnkube in  cluster manager and/or master, and/or node mode")
+	}
+
+	if clusterManager != "" && node != "" {
+		return fmt.Errorf("cannot run in both cluster manager and node mode")
 	}
 
 	stopChan := make(chan struct{})
@@ -221,6 +227,8 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	var watchFactory factory.Shutdownable
 	var masterWatchFactory *factory.WatchFactory
 	var masterEventRecorder record.EventRecorder
+	var clusterManagerWatchFactory *factory.WatchFactory
+
 	if master != "" {
 		var err error
 		// create factory and start the controllers asked for
@@ -229,6 +237,29 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 			return err
 		}
 		watchFactory = masterWatchFactory
+	}
+
+	if clusterManager != "" {
+		// Create a new client set for clusterManager.
+		// If both master and clusterManager are enabled, then having
+		// same client set and same watch factory causes the leader election
+		// process to not work properly.
+		clientSet, err := util.NewOVNClientset(&config.Kubernetes)
+		clusterManagerWatchFactory, err = factory.NewClusterManagerWatchFactory(clientSet)
+		if err != nil {
+			return err
+		}
+		metrics.RegisterClusterManagerBase()
+
+		cm := clustermanager.NewClusterManager(clientSet, clusterManagerWatchFactory, stopChan,
+			util.EventRecorder(clientSet.KubeClient))
+		if err := cm.Start(clusterManager, wg, ctx.Context); err != nil {
+			return err
+		}
+	}
+
+	if master != "" {
+		var err error
 		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
 
 		if libovsdbOvnNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {
@@ -306,7 +337,12 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	// run until cancelled
 	<-ctx.Context.Done()
 	close(stopChan)
-	watchFactory.Shutdown()
+	if watchFactory != nil {
+		watchFactory.Shutdown()
+	}
+	if clusterManagerWatchFactory != nil {
+		clusterManagerWatchFactory.Shutdown()
+	}
 	wg.Wait()
 	return nil
 }
