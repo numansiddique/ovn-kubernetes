@@ -16,6 +16,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	cm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -132,14 +133,16 @@ func setupHybridOverlayOVNObjects(node tNode, hoSubnet, nodeHOIP, nodeHOMAC stri
 
 }
 
-func setupClusterController(clusterController *Controller, clusterLBUUID, expectedNodeSwitchUUID, node1Name string) {
+func setupClusterController(clusterManager *cm.ClusterManager, clusterController *Controller, clusterLBUUID, expectedNodeSwitchUUID, node1Name string) {
 	var err error
-	for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
-		clusterController.hybridOverlaySubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
-	}
+	if clusterManager != nil {
+		for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
+			clusterManager.AddHybridOverlaySubnetNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
+		}
 
-	for _, clusterEntry := range config.Default.ClusterSubnets {
-		clusterController.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
+		for _, clusterEntry := range config.Default.ClusterSubnets {
+			clusterManager.AddClusterSubnetNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
+		}
 	}
 	clusterController.SCTPSupport = true
 	clusterController.loadBalancerGroupUUID = clusterLBUUID
@@ -233,11 +236,15 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(0))
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
+
+			clusterManager := cm.NewClusterManager(fakeClient, f, stopChan,
+				record.NewFakeRecorder(0))
 			for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
-				clusterController.hybridOverlaySubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
+				clusterManager.AddHybridOverlaySubnetNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
 			}
 
 			// Let the real code run and ensure OVN database sync
+			gomega.Expect(clusterManager.WatchNodes()).To(gomega.Succeed())
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
 			// Windows node should be allocated a subnet
@@ -391,11 +398,15 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(0))
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+			clusterManager := cm.NewClusterManager(fakeClient, f, stopChan,
+				record.NewFakeRecorder(0))
+			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+			setupClusterController(clusterManager, clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
 			// Let the real code run and ensure OVN database sync
+			gomega.Expect(clusterManager.WatchNodes()).To(gomega.Succeed())
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
 			gomega.Eventually(func() (map[string]string, error) {
@@ -678,13 +689,17 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(0))
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+			clusterManager := cm.NewClusterManager(fakeClient, f, stopChan,
+				record.NewFakeRecorder(0))
+			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+			setupClusterController(clusterManager, clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// Let the real code run and ensure OVN database sync
+			gomega.Expect(clusterManager.WatchNodes()).To(gomega.Succeed())
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
 			gomega.Eventually(func() (map[string]string, error) {
@@ -842,11 +857,15 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(0))
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+			clusterManager := cm.NewClusterManager(fakeClient, f, stopChan,
+				record.NewFakeRecorder(0))
+			gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+			setupClusterController(clusterManager, clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
 			// Let the real code run and ensure OVN database sync
+			gomega.Expect(clusterManager.WatchNodes()).To(gomega.Succeed())
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
 			gomega.Eventually(func() (map[string]string, error) {
@@ -1100,7 +1119,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(0))
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
+			setupClusterController(nil, clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
