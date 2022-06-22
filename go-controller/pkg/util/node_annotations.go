@@ -72,6 +72,8 @@ const (
 	// capacity for each node. It is set by
 	// openshift/cloud-network-config-controller
 	cloudEgressIPConfigAnnotationKey = "cloud.network.openshift.io/egress-ipconfig"
+
+	OvnNodeId = "k8s.ovn.org/ovn-node-id"
 )
 
 type L3GatewayConfig struct {
@@ -546,4 +548,17 @@ func NoHostSubnet(node *kapi.Node) bool {
 
 	nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
 	return nodeSelector.Matches(labels.Set(node.Labels))
+}
+
+func GetNodeId(node *kapi.Node) int {
+	nodeId, ok := node.Annotations[OvnNodeId]
+	if !ok {
+		return -1
+	}
+
+	id, err := strconv.Atoi(nodeId)
+	if err != nil {
+		return -1
+	}
+	return id
 }
