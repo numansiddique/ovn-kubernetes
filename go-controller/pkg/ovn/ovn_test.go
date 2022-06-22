@@ -14,7 +14,9 @@ import (
 	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -126,6 +128,13 @@ func (o *FakeOVN) init() {
 	o.controller.clusterLoadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
 	o.controller.switchLoadBalancerGroupUUID = types.ClusterSwitchLBGroupName + "-UUID"
 	o.controller.routerLoadBalancerGroupUUID = types.ClusterRouterLBGroupName + "-UUID"
+
+	existingNodes, err := o.controller.kube.GetNodes()
+	if err == nil {
+		for _, node := range existingNodes.Items {
+			o.controller.localZoneNodes.Store(node.Name, true)
+		}
+	}
 }
 
 func resetNBClient(ctx context.Context, nbClient libovsdbclient.Client) {
@@ -154,6 +163,17 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 	}
 
 	podRecorder := metrics.NewPodRecorder()
+
+	nbZoneFailed := false
+	// Try to get the NBZone.  If there is an error, create NB_Global record.
+	// Otherwise NewCommonNetworkControllerInfo() will return error since it
+	// calls util.GetNBZone().
+	_, err := util.GetNBZone(libovsdbOvnNBClient)
+	if err != nil {
+		nbZoneFailed = true
+		nbGlobal := &nbdb.NBGlobal{Name: "global"}
+		_ = libovsdbops.CreateorUpdateNBGlobal(libovsdbOvnNBClient, nbGlobal)
+	}
 	cnci, err := NewCommonNetworkControllerInfo(
 		ovnClient.KubeClient,
 		&kube.KubeOVN{
@@ -175,5 +195,13 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 		return nil, err
 	}
 
-	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory)
+	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory)
+
+	if nbZoneFailed {
+		// Delete the NBGlobal row as this function created it.  Otherwise many tests would fail while
+		// checking the expectedData in the NBDB.
+		_ = libovsdbops.DeleteNBGlobal(libovsdbOvnNBClient, &nbdb.NBGlobal{Name: "global"})
+	}
+
+	return dnc, err
 }
