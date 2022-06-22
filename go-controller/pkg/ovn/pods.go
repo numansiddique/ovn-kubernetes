@@ -36,7 +36,7 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
 		}
 		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations)
-		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && !util.PodCompleted(pod) && err == nil {
+		if oc.isPodScheduledinLocalZone(pod) && util.PodWantsNetwork(pod) && !util.PodCompleted(pod) && err == nil {
 			// skip nodes that are not running ovnk (inferred from host subnets)
 			if oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) {
 				continue
@@ -88,8 +88,8 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		}
 	}
 
-	// get all the nodes from the watchFactory
-	nodes, err := oc.watchFactory.GetNodes()
+	// get all the local zone nodes from the watchFactory
+	nodes, err := oc.GetLocalZoneNodes()
 	if err != nil {
 		return fmt.Errorf("failed to get nodes: %v", err)
 	}
@@ -181,9 +181,6 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 		return fmt.Errorf("unable to delete external gateway routes for pod %s: %w", podDesc, err)
 	}
 	if pod.Spec.HostNetwork {
-		return nil
-	}
-	if !util.PodScheduled(pod) {
 		return nil
 	}
 
