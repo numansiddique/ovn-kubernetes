@@ -101,6 +101,29 @@ func newPod(namespace, name, node, podIP string) *v1.Pod {
 	}
 }
 
+func newNode(nodeName, nodeIPv4 string) *v1.Node {
+	return &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, ""),
+				"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
+			},
+			Labels: map[string]string{
+				"k8s.ovn.org/egress-assignable": "",
+			},
+		},
+		Status: v1.NodeStatus{
+			Conditions: []v1.NodeCondition{
+				{
+					Type:   v1.NodeReady,
+					Status: v1.ConditionTrue,
+				},
+			},
+		},
+	}
+}
+
 type testPod struct {
 	portUUID     string
 	nodeName     string
@@ -223,6 +246,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 		initialDB libovsdbtest.TestSetup
 	)
 
+	const (
+		node1Name = "node1"
+		node2Name = "node2"
+	)
+
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
@@ -268,6 +296,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -339,6 +372,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 							namespaceT,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{},
 					},
@@ -386,6 +424,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -491,6 +534,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -659,6 +707,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 							namespaceT,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{*myPod},
 					},
@@ -697,6 +750,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -774,6 +832,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 							namespace1,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{*pod},
 					},
@@ -844,6 +907,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -920,6 +988,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -1016,6 +1089,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -1119,6 +1197,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 							namespaceT,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{
 							*pod,
@@ -1159,6 +1242,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -1216,6 +1304,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 							namespaceT,
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
+						},
+					},
 					&v1.PodList{
 						Items: []v1.Pod{
 							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
@@ -1269,7 +1362,13 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 				podJSON := t.getAnnotationsJson()
 
-				fakeOvn.startWithDBSetup(initialDB)
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
+						},
+					},
+				)
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1315,6 +1414,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -1368,6 +1472,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
 						},
 					},
 					&v1.PodList{
@@ -1546,6 +1655,12 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
+							*newNode(node2Name, "192.168.126.51/24"),
 						},
 					},
 					&v1.PodList{

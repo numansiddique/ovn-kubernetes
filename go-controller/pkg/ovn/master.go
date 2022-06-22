@@ -242,6 +242,17 @@ func (oc *Controller) StartClusterMaster() error {
 		return err
 	}
 
+	zone, err := libovsdbops.GetNBZone(oc.nbClient)
+	if err != nil {
+		klog.Errorf("Failed to get NB global Name: %v", err)
+		return err
+	}
+
+	if zone == "" {
+		zone = "global"
+	}
+	oc.zone = zone
+
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in fetching nodes: %v", err)
@@ -1030,13 +1041,18 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 		if !ok {
 			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
 		}
-		foundNodes.Insert(node.Name)
 
-		// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
-		_, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
-		if err != nil {
-			// TODO (flaviof): keep going even if EnsureJoinLRPIPs returned an error. Maybe we should not.
-			klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
+		// Add the node to the foundNodes only if it belongs to the local zone.
+		if oc.isLocalZoneNode(node) {
+			foundNodes.Insert(node.Name)
+			oc.localZoneNodes.Store(node.Name, true)
+
+			// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
+			_, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
+			if err != nil {
+				// TODO (flaviof): keep going even if EnsureJoinLRPIPs returned an error. Maybe we should not.
+				klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
+			}
 		}
 	}
 
@@ -1136,10 +1152,15 @@ type nodeSyncs struct {
 	syncGw                bool
 }
 
-func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
+func (oc *Controller) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
+
+	_, present := oc.localZoneNodes.Load(node.Name)
+	if !present {
+		oc.localZoneNodes.Store(node.Name, true)
+	}
 
 	if noHostSubnet := noHostSubnet(node); noHostSubnet {
 		err := oc.lsManager.AddNoHostSubnetNode(node.Name)
@@ -1222,9 +1243,20 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 	return kerrors.NewAggregate(errs)
 }
 
+func (oc *Controller) updateNodeMovementEvent(node *kapi.Node) error {
+	_, present := oc.localZoneNodes.Load(node.Name)
+
+	if present {
+		_ = oc.deleteNodeEvent(node)
+	}
+	return nil
+}
+
 func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 	klog.V(5).Infof("Deleting Node %q. Removing the node from "+
 		"various caches", node.Name)
+
+	oc.localZoneNodes.Delete(node.Name)
 
 	if err := oc.deleteNode(node.Name); err != nil {
 		return err
@@ -1265,4 +1297,13 @@ func (oc *Controller) createACLLoggingMeter() error {
 	}
 
 	return nil
+}
+
+// isLocalZoneNode returns true if the node is part of the local zone.
+func (oc *Controller) isLocalZoneNode(node *kapi.Node) bool {
+	return util.GetNodeZone(node) == oc.zone
+}
+
+func (oc *Controller) isRemoteZoneNode(node *kapi.Node) bool {
+	return util.GetNodeZone(node) != oc.zone
 }

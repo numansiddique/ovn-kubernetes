@@ -643,25 +643,28 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
-		var nodeParams *nodeSyncs
-		if fromRetryLoop {
-			_, nodeSync := oc.addNodeFailed.Load(node.Name)
-			_, clusterRtrSync := oc.nodeClusterRouterPortFailed.Load(node.Name)
-			_, mgmtSync := oc.mgmtPortFailed.Load(node.Name)
-			_, gwSync := oc.gatewaysFailed.Load(node.Name)
-			nodeParams = &nodeSyncs{
-				nodeSync,
-				clusterRtrSync,
-				mgmtSync,
-				gwSync}
-		} else {
-			nodeParams = &nodeSyncs{true, true, true, true}
-		}
 
-		if err = oc.addUpdateNodeEvent(node, nodeParams); err != nil {
-			klog.Infof("Node retry delete failed for %s, will try again later: %v",
-				node.Name, err)
-			return err
+		if oc.isLocalZoneNode(node) {
+			var nodeParams *nodeSyncs
+			if fromRetryLoop {
+				_, nodeSync := oc.addNodeFailed.Load(node.Name)
+				_, clusterRtrSync := oc.nodeClusterRouterPortFailed.Load(node.Name)
+				_, mgmtSync := oc.mgmtPortFailed.Load(node.Name)
+				_, gwSync := oc.gatewaysFailed.Load(node.Name)
+				nodeParams = &nodeSyncs{
+					nodeSync,
+					clusterRtrSync,
+					mgmtSync,
+					gwSync}
+			} else {
+				nodeParams = &nodeSyncs{true, true, true, true}
+			}
+
+			if err = oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
+				klog.Infof("Node retry delete failed for %s, will try again later: %v",
+					node.Name, err)
+				return err
+			}
 		}
 
 	case factory.PeerServiceType:
@@ -807,6 +810,13 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 		if err != nil {
 			return err
 		}
+
+		if oc.isPodScheduledinLocalZone(oldPod) && oc.isPodScheduledinRemoteZone(newPod) {
+			lpInfo := oc.getPortInfo(newPod)
+			oc.logicalPortCache.remove(util.GetLogicalPortName(oldPod.Namespace, oldPod.Name))
+			return oc.removePod(newPod, lpInfo)
+		}
+
 		return oc.ensurePod(oldPod, newPod, objectsToRetry.checkRetryObj(newKey) || util.PodScheduled(oldPod) != util.PodScheduled(newPod))
 
 	case factory.NodeType:
@@ -818,17 +828,37 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 		if !ok {
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
-		// determine what actually changed in this update
-		_, nodeSync := oc.addNodeFailed.Load(newNode.Name)
-		_, failed := oc.nodeClusterRouterPortFailed.Load(newNode.Name)
-		clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
-		_, failed = oc.mgmtPortFailed.Load(newNode.Name)
-		mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
-		_, failed = oc.gatewaysFailed.Load(newNode.Name)
-		gwSync := (failed || gatewayChanged(oldNode, newNode) ||
-			nodeSubnetChanged(oldNode, newNode) || hostAddressesChanged(oldNode, newNode))
 
-		return oc.addUpdateNodeEvent(newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync})
+		if oc.isLocalZoneNode(newNode) {
+			var nodeParams *nodeSyncs
+			if oc.isRemoteZoneNode(oldNode) {
+				nodeParams = &nodeSyncs{true, true, true, true}
+			} else {
+				// determine what actually changed in this update
+				_, nodeSync := oc.addNodeFailed.Load(newNode.Name)
+				_, failed := oc.nodeClusterRouterPortFailed.Load(newNode.Name)
+				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
+				_, failed = oc.mgmtPortFailed.Load(newNode.Name)
+				mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
+				_, failed = oc.gatewaysFailed.Load(newNode.Name)
+				gwSync := (failed || gatewayChanged(oldNode, newNode) ||
+					nodeSubnetChanged(oldNode, newNode) || hostAddressesChanged(oldNode, newNode))
+
+				nodeParams = &nodeSyncs{
+					nodeSync,
+					clusterRtrSync,
+					mgmtSync,
+					gwSync}
+			}
+
+			return oc.addUpdateLocalNodeEvent(newNode, nodeParams)
+
+		} else if oc.isLocalZoneNode(oldNode) {
+			// The node moved from this zone to other remote zone.
+			return oc.updateNodeMovementEvent(newNode)
+		}
+
+		return nil
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)

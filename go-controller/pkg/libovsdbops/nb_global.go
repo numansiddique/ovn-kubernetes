@@ -62,3 +62,13 @@ func UpdateNBGlobalSetOptions(nbClient libovsdbclient.Client, nbGlobal *nbdb.NBG
 	_, err = m.CreateOrUpdate(opModel)
 	return err
 }
+
+func GetNBZone(nbClient libovsdbclient.Client) (string, error) {
+	nbGlobal := &nbdb.NBGlobal{}
+	nbGlobal, err := GetNBGlobal(nbClient, nbGlobal)
+	if err != nil {
+		return "", err
+	}
+
+	return nbGlobal.Name, nil
+}
