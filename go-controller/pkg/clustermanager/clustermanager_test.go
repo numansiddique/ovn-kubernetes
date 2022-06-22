@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -324,7 +325,7 @@ var _ = ginkgo.Describe("Cluster Manager operations", func() {
 		wg.Wait()
 	})
 
-	ginkgo.It("Cluster Manager Node subnet allocations", func() {
+	ginkgo.It("Cluster Manager Node subnet allocations and node id allocations", func() {
 
 		app.Action = func(ctx *cli.Context) error {
 			nodes := []v1.Node{
@@ -389,6 +390,40 @@ var _ = ginkgo.Describe("Cluster Manager operations", func() {
 				}, 2).Should(gomega.HaveLen(1))
 			}
 
+			for _, n := range nodes {
+				gomega.Eventually(func() error {
+					updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					nodeId, ok := updatedNode.Annotations[util.OvnNodeId]
+					if !ok {
+						return fmt.Errorf("expected node annotation for node %s to have node id allocated", n.Name)
+					}
+
+					_, err = strconv.Atoi(nodeId)
+					if err != nil {
+						return fmt.Errorf("expected node annotation for node %s to be an integer value, got %s", n.Name, nodeId)
+					}
+
+					_, ok = updatedNode.Annotations["k8s.ovn.org/ovn-node-transit-switch-port-ips"]
+					if !ok {
+						return fmt.Errorf("expected node annotation for node %s to have transit switch port ips allocated", n.Name)
+					}
+
+					transitSwitchIps, err := util.ParseNodeTransitSwitchPortAddresses(updatedNode)
+					if err != nil {
+						return fmt.Errorf("error parsing transit switch ip annotations for the node %s", n.Name)
+					}
+
+					if len(transitSwitchIps) < 1 {
+						return fmt.Errorf("transit switch ips for node %s not allocated", n.Name)
+					}
+					return nil
+				}).ShouldNot(gomega.HaveOccurred())
+			}
+
 			// Clear the subnet annotation of node 1 and make sure it is re-allocated by cluster manager.
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil}, "node1")
 			util.DeleteNodeHostSubnetAnnotation(nodeAnnotator)
@@ -402,6 +437,72 @@ var _ = ginkgo.Describe("Cluster Manager operations", func() {
 
 				return util.ParseNodeHostSubnetAnnotation(updatedNode)
 			}, 2).Should(gomega.HaveLen(1))
+
+			node1, _ := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node1", metav1.GetOptions{})
+			node1Id := node1.Annotations[util.OvnNodeId]
+
+			// Clear the nodeId annotation from node 1.
+			nodeAnnotations := node1.Annotations
+			for k, v := range nodeAnnotations {
+				nodeAnnotator.Set(k, v)
+			}
+			nodeAnnotator.Delete(util.OvnNodeId)
+			err = nodeAnnotator.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() error {
+				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node1", metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+
+				updatedNodeId, ok := updatedNode.Annotations[util.OvnNodeId]
+				if !ok {
+					return fmt.Errorf("expected node annotation for node - node1 to have node id allocated")
+				}
+
+				_, err = strconv.Atoi(updatedNodeId)
+				if err != nil {
+					return fmt.Errorf("expected node annotation for node - node1 to be an integer value, got %s", updatedNodeId)
+				}
+
+				gomega.Expect(node1Id).To(gomega.Equal(updatedNodeId))
+				return nil
+			}).ShouldNot(gomega.HaveOccurred())
+
+			// Clear the transit switch port ip annotation from node 1.
+			node1, _ = fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node1", metav1.GetOptions{})
+			nodeAnnotations = node1.Annotations
+			for k, v := range nodeAnnotations {
+				nodeAnnotator.Set(k, v)
+			}
+			node1TransitSwitchIps := node1.Annotations["k8s.ovn.org/ovn-node-transit-switch-port-ips"]
+			nodeAnnotator.Delete("k8s.ovn.org/ovn-node-transit-switch-port-ips")
+			err = nodeAnnotator.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() error {
+				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node1", metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+
+				updatedNode1TransitSwitchIps, ok := updatedNode.Annotations["k8s.ovn.org/ovn-node-transit-switch-port-ips"]
+				if !ok {
+					return fmt.Errorf("expected node annotation for node node1 to have transit switch port ips allocated")
+				}
+
+				transitSwitchIps, err := util.ParseNodeTransitSwitchPortAddresses(updatedNode)
+				if err != nil {
+					return fmt.Errorf("error parsing transit switch ip annotations for the node node1")
+				}
+
+				if len(transitSwitchIps) < 1 {
+					return fmt.Errorf("transit switch ips for node node1 not allocated")
+				}
+				gomega.Expect(node1TransitSwitchIps).To(gomega.Equal(updatedNode1TransitSwitchIps))
+				return nil
+			}).ShouldNot(gomega.HaveOccurred())
 			return nil
 		}
 
