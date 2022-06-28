@@ -1281,6 +1281,14 @@ func (oc *Controller) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs
 		oc.retryPods.requestRetryObjs()
 	}
 
+	if oc.interconnectSupport {
+		if err = oc.interconnectAddUpdateLocalNode(node); err != nil {
+			klog.Errorf("Interconnect Local Node update failed for %s, will try again later: %v",
+				node.Name, err)
+			errs = append(errs, err)
+		}
+	}
+
 	if len(errs) == 0 {
 		return nil
 	}
@@ -1293,12 +1301,21 @@ func (oc *Controller) addUpdateRemoteNodeEvent(node *kapi.Node) error {
 	if present {
 		_ = oc.deleteNodeEvent(node)
 	}
+
+	if oc.interconnectSupport {
+		return oc.interconnectAddUpdateRemoteNode(node)
+	}
+
 	return nil
 }
 
 func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 	klog.V(5).Infof("Deleting Node %q. Removing the node from "+
 		"various caches", node.Name)
+
+	if oc.interconnectSupport {
+		_ = oc.interconnectRemoveNode(node)
+	}
 
 	oc.localZoneNodes.Delete(node.Name)
 
@@ -1310,6 +1327,7 @@ func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 	oc.mgmtPortFailed.Delete(node.Name)
 	oc.gatewaysFailed.Delete(node.Name)
 	oc.nodeClusterRouterPortFailed.Delete(node.Name)
+
 	return nil
 }
 
