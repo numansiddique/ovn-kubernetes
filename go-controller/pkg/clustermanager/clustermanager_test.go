@@ -305,6 +305,7 @@ var _ = ginkgo.Describe("Cluster Manager operations", func() {
 	const (
 		clusterIPNet             string = "10.1.0.0"
 		clusterCIDR              string = clusterIPNet + "/16"
+		joinSubnetCIDR           string = "100.64.0.0/16/19"
 		hybridOverlayClusterCIDR string = "11.1.0.0/16/24"
 	)
 
@@ -325,7 +326,7 @@ var _ = ginkgo.Describe("Cluster Manager operations", func() {
 		wg.Wait()
 	})
 
-	ginkgo.It("Cluster Manager Node subnet allocations and node id allocations", func() {
+	ginkgo.It("Cluster Manager Node subnet allocations, node id allocations and zone join subnet allocations", func() {
 
 		app.Action = func(ctx *cli.Context) error {
 			nodes := []v1.Node{
@@ -376,6 +377,9 @@ var _ = ginkgo.Describe("Cluster Manager operations", func() {
 			for _, clusterEntry := range config.Default.ClusterSubnets {
 				clusterManager.AddClusterSubnetNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
 			}
+			for _, clusterEntry := range config.ClusterManager.ZoneJoinSubnets {
+				clusterManager.AddJoinSubnetNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
+			}
 			gomega.Expect(clusterManager.WatchNodes()).To(gomega.Succeed())
 
 			// Check that cluster manager has set the subnet annotation for each node.
@@ -422,6 +426,18 @@ var _ = ginkgo.Describe("Cluster Manager operations", func() {
 					}
 					return nil
 				}).ShouldNot(gomega.HaveOccurred())
+			}
+
+			// Check that cluster manager has set the zone join subnet annotation for each node.
+			for _, n := range nodes {
+				gomega.Eventually(func() ([]*net.IPNet, error) {
+					updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
+					if err != nil {
+						return nil, err
+					}
+
+					return util.ParseZoneJoinSubnetsAnnotation(updatedNode)
+				}, 2).Should(gomega.HaveLen(1))
 			}
 
 			// Clear the subnet annotation of node 1 and make sure it is re-allocated by cluster manager.
@@ -503,12 +519,92 @@ var _ = ginkgo.Describe("Cluster Manager operations", func() {
 				gomega.Expect(node1TransitSwitchIps).To(gomega.Equal(updatedNode1TransitSwitchIps))
 				return nil
 			}).ShouldNot(gomega.HaveOccurred())
+
+			node1, err = fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node1", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			globalZoneJoinSubnetForNode1 := node1.Annotations["k8s.ovn.org/zone-join-subnets"]
+
+			node2, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node2", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			globalZoneJoinSubnetForNode2 := node2.Annotations["k8s.ovn.org/zone-join-subnets"]
+			gomega.Expect(globalZoneJoinSubnetForNode1).To(gomega.Equal(globalZoneJoinSubnetForNode2))
+
+			// Change the zone of node 1.
+			nodeAnnotations = node1.Annotations
+			for k, v := range nodeAnnotations {
+				nodeAnnotator.Set(k, v)
+			}
+			nodeAnnotator.Set("k8s.ovn.org/ovn-zone", "node1Zone")
+			err = nodeAnnotator.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() error {
+				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node1", metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+
+				updatedNode1JoinSubnetAnnotation, ok := updatedNode.Annotations["k8s.ovn.org/zone-join-subnets"]
+				if !ok {
+					return fmt.Errorf("expected node annotation for node node1 to have zone join subnets")
+				}
+
+				if updatedNode1JoinSubnetAnnotation == globalZoneJoinSubnetForNode1 {
+					return fmt.Errorf("join subnet annotation for node node1 should have different subnet than the global zone")
+				}
+				joinSubnets, err := util.ParseZoneJoinSubnetsAnnotation(updatedNode)
+				if err != nil {
+					return fmt.Errorf("error parsing zone join subnet annotation for the node node1")
+				}
+
+				if len(joinSubnets) < 1 {
+					return fmt.Errorf("zone join subnet annotation for node1 is empty")
+				}
+				return nil
+			}).ShouldNot(gomega.HaveOccurred())
+
+			// Reset the zone of node 1 to global
+			nodeAnnotations = node1.Annotations
+			for k, v := range nodeAnnotations {
+				nodeAnnotator.Set(k, v)
+			}
+			nodeAnnotator.Set("k8s.ovn.org/ovn-zone", "global")
+			err = nodeAnnotator.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() error {
+				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node1", metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+
+				updatedNode1JoinSubnetAnnotation, ok := updatedNode.Annotations["k8s.ovn.org/zone-join-subnets"]
+				if !ok {
+					return fmt.Errorf("expected node annotation for node node1 to have zone join subnets")
+				}
+
+				if updatedNode1JoinSubnetAnnotation != globalZoneJoinSubnetForNode1 {
+					return fmt.Errorf("join subnet annotation for node node1 should have the global zone join subnet")
+				}
+
+				joinSubnets, err := util.ParseZoneJoinSubnetsAnnotation(updatedNode)
+				if err != nil {
+					return fmt.Errorf("error parsing zone join subnet annotation for the node node1")
+				}
+
+				if len(joinSubnets) < 1 {
+					return fmt.Errorf("zone join subnet annotation for node1 is empty")
+				}
+				return nil
+			}).ShouldNot(gomega.HaveOccurred())
 			return nil
 		}
 
 		err := app.Run([]string{
 			app.Name,
 			"-cluster-subnets=" + clusterCIDR,
+			"-init-cluster-manager",
+			"-zone-join-switch-subnets=" + joinSubnetCIDR,
 		})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})

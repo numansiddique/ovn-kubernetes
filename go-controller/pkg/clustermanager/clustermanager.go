@@ -53,6 +53,8 @@ type ClusterManager struct {
 	clusterSubnetAllocator       *subnetallocator.SubnetAllocator
 	hybridOverlaySubnetAllocator *subnetallocator.SubnetAllocator
 
+	zoneJoinNetworkAllocator *subnetallocator.SubnetAllocator
+
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 
@@ -65,6 +67,9 @@ type ClusterManager struct {
 	nodeIdBitmap    *bitmapallocator.AllocationBitmap
 	nodeIdCache     map[string]int
 	nodeIdCacheLock sync.Mutex
+
+	zoneJoinSubnetCache map[string]([]*net.IPNet)
+	zoneIdCacheLock     sync.Mutex
 
 	transitSwitchv4Cidr   *net.IPNet
 	transitSwitchBasev4Ip *big.Int
@@ -101,9 +106,11 @@ func NewClusterManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory, s
 		stopChan:                     stopChan,
 		clusterSubnetAllocator:       subnetallocator.NewSubnetAllocator(),
 		hybridOverlaySubnetAllocator: hybridOverlaySubnetAllocator,
+		zoneJoinNetworkAllocator:     subnetallocator.NewSubnetAllocator(),
 		recorder:                     recorder,
 		nodeIdBitmap:                 nodeIdBitmap,
 		nodeIdCache:                  make(map[string]int),
+		zoneJoinSubnetCache:          make(map[string]([]*net.IPNet)),
 		transitSwitchBasev4Ip:        utilnet.BigForIP(tsv4Cidr.IP),
 		transitSwitchv4Cidr:          tsv4Cidr,
 		transitSwitchBasev6Ip:        utilnet.BigForIP(tsv6Cidr.IP),
@@ -246,6 +253,13 @@ func (cm *ClusterManager) StartClusterManager() error {
 		}
 	}
 
+	for _, zoneSubnetEntry := range config.ClusterManager.ZoneJoinSubnets {
+		err := cm.AddJoinSubnetNetworkRange(zoneSubnetEntry.CIDR, zoneSubnetEntry.HostSubnetLength)
+		if err != nil {
+			return err
+		}
+		klog.V(5).Infof("Added network range %s to the zone join switch subnet allocator", zoneSubnetEntry.CIDR)
+	}
 	// update metrics for host subnets
 	metrics.RecordSubnetCount(v4HostSubnetCount, v6HostSubnetCount)
 
@@ -272,6 +286,10 @@ func (cm *ClusterManager) AddClusterSubnetNetworkRange(network *net.IPNet, hostS
 
 func (cm *ClusterManager) AddHybridOverlaySubnetNetworkRange(network *net.IPNet, hostSubnetLen int) error {
 	return cm.hybridOverlaySubnetAllocator.AddNetworkRange(network, hostSubnetLen)
+}
+
+func (cm *ClusterManager) AddJoinSubnetNetworkRange(network *net.IPNet, hostSubnetLen int) error {
+	return cm.zoneJoinNetworkAllocator.AddNetworkRange(network, hostSubnetLen)
 }
 
 // WatchNodes starts the watching of node resource and calls
@@ -337,6 +355,20 @@ func (cm *ClusterManager) syncNodes(nodes []interface{}) error {
 				utilruntime.HandleError(err)
 			}
 			util.UpdateUsedHostSubnetsCount(hostSubnet, &cm.v4HostSubnetsUsed, &cm.v6HostSubnetsUsed, true)
+		}
+		nodeZone := util.GetNodeZone(node)
+		zoneSubnets, err := util.ParseZoneJoinSubnetsAnnotation(node)
+		if err != nil {
+			continue
+		}
+		_, found := cm.zoneJoinSubnetCache[nodeZone]
+		if !found {
+			cm.zoneJoinSubnetCache[nodeZone] = zoneSubnets
+			for _, subnet := range zoneSubnets {
+				if !cm.zoneJoinNetworkAllocator.IsNetworkAllocated(subnet) {
+					_ = cm.zoneJoinNetworkAllocator.MarkAllocatedNetwork(subnet)
+				}
+			}
 		}
 	}
 	return nil
@@ -411,6 +443,11 @@ func (cm *ClusterManager) addNode(node *kapi.Node) error {
 		nodeAnnotations[util.OvnNodeId] = strconv.Itoa(allocatedNodeId)
 	}
 
+	zoneJoinSubnets, err := cm.allocateZoneJoinSubnets(node)
+	if err != nil {
+		return err
+	}
+
 	// Generate v4 and v6 transit switch port IPs for the node.
 	nodeTransitSwitchPortIps := cm.syncNodeTransitSwitchPortIps(node, allocatedNodeId)
 	if nodeTransitSwitchPortIps != nil {
@@ -423,6 +460,12 @@ func (cm *ClusterManager) addNode(node *kapi.Node) error {
 		for k, v := range transitSwitchPortAnnotations {
 			nodeAnnotations[k] = v
 		}
+	}
+
+	joinSubnetAnnotations, err := util.CreateZoneJoinSubnetsAnnotation(zoneJoinSubnets)
+	zoneJoinSubnet := joinSubnetAnnotations[util.OvnZoneJoinSubnets]
+	if zoneJoinSubnet != node.Annotations[util.OvnZoneJoinSubnets] {
+		nodeAnnotations[util.OvnZoneJoinSubnets] = zoneJoinSubnet
 	}
 
 	if len(nodeAnnotations) > 0 {
@@ -627,6 +670,41 @@ func (cm *ClusterManager) releaseHybridOverlayNodeSubnet(nodeName string, subnet
 	}
 	klog.Infof("Deleted hybrid overlay HostSubnet %s for node %s", subnet, nodeName)
 	return nil
+}
+
+func (cm *ClusterManager) allocateZoneJoinSubnets(node *kapi.Node) ([]*net.IPNet, error) {
+	cm.zoneIdCacheLock.Lock()
+	defer func() {
+		cm.zoneIdCacheLock.Unlock()
+	}()
+
+	nodeZone := util.GetNodeZone(node)
+	allocatedZoneSubnets, found := cm.zoneJoinSubnetCache[nodeZone]
+	if found {
+		return allocatedZoneSubnets, nil
+	}
+
+	allocatedSubnets := []*net.IPNet{}
+	if config.IPv4Mode {
+		allocatedSubnet, err := cm.zoneJoinNetworkAllocator.AllocateIPv4Network()
+		if err != nil {
+			return nil, fmt.Errorf("error allocating join IPv4 network for zone %s: %v", nodeZone, err)
+		}
+
+		allocatedSubnets = append(allocatedSubnets, allocatedSubnet)
+	}
+
+	if config.IPv6Mode {
+		allocatedSubnet, err := cm.zoneJoinNetworkAllocator.AllocateIPv6Network()
+		if err != nil {
+			return nil, fmt.Errorf("error allocating join IPv6 network for zone %s: %v", nodeZone, err)
+		}
+
+		allocatedSubnets = append(allocatedSubnets, allocatedSubnet)
+	}
+
+	cm.zoneJoinSubnetCache[nodeZone] = allocatedSubnets
+	return allocatedSubnets, nil
 }
 
 func (cm *ClusterManager) removeNodeId(nodeName string, nodeId int) {
