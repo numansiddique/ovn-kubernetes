@@ -148,7 +148,7 @@ func setupClusterController(clusterManager *cm.ClusterManager, clusterController
 	clusterController.loadBalancerGroupUUID = clusterLBUUID
 	clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(clusterController.nbClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitchUUID, []string{node1Name})
+	clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitchUUID, []string{node1Name}, getJoinSwitchSubnets())
 
 }
 
