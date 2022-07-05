@@ -222,6 +222,8 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
+        - name: OVN_INTERCONNECT_ENABLE
+          value: "{{ ovn_interconnect_enable }}"
       # end of container
 
       - name: ovnkube-master

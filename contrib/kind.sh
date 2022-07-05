@@ -222,6 +222,8 @@ parse_args() {
                                                 ;;
             -ric | --run-in-container )         RUN_IN_CONTAINER=true
                                                 ;;
+            -laz | --local-az-enabled )         OVN_LOCAL_AZ_SUPPORT=true
+                                                ;;
             --delete )                          delete
                                                 exit
                                                 ;;
@@ -277,6 +279,7 @@ print_params() {
      echo "OVN_HOST_NETWORK_NAMESPACE = $OVN_HOST_NETWORK_NAMESPACE"
      echo "OVN_ENABLE_EX_GW_NETWORK_BRIDGE = $OVN_ENABLE_EX_GW_NETWORK_BRIDGE"
      echo "OVN_EX_GW_NETWORK_INTERFACE = $OVN_EX_GW_NETWORK_INTERFACE"
+     echo "OVN_LOCAL_AZ_SUPPORT = $OVN_LOCAL_AZ_SUPPORT"
      echo ""
 }
 
@@ -383,6 +386,7 @@ set_default_params() {
   fi
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
+  OVN_LOCAL_AZ_SUPPORT=${OVN_LOCAL_AZ_SUPPORT:-false}
 }
 
 detect_apiserver_url() {
@@ -583,7 +587,8 @@ create_ovn_kube_manifests() {
     --egress-qos-enable=true \
     --v4-join-subnet="${JOIN_SUBNET_IPV4}" \
     --v6-join-subnet="${JOIN_SUBNET_IPV6}" \
-    --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}"
+    --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
+    --interconnect-enable="${OVN_LOCAL_AZ_SUPPORT}"
   popd
 }
 
@@ -629,9 +634,20 @@ install_ovn() {
   else
     run_kubectl apply -f ovnkube-db.yaml
   fi
+
+  if [ "$OVN_LOCAL_AZ_SUPPORT" == true ]; then
+    NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort)
+    for n in $NODES; do
+      if  ! kubectl get node $n --show-labels | grep ovnkube-db; then
+         kubectl label --overwrite node $n k8s.ovn.org/ovnkube-az=local
+      fi
+    done
+  fi
+
   run_kubectl apply -f ovs-node.yaml
   run_kubectl apply -f ovnkube-master.yaml
   run_kubectl apply -f ovnkube-node.yaml
+  run_kubectl apply -f ovnkube-local.yaml
   popd
 }
 
