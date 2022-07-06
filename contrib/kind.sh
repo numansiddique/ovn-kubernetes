@@ -337,7 +337,7 @@ set_default_params() {
   KIND_IMAGE=${KIND_IMAGE:-kindest/node}
   K8S_VERSION=${K8S_VERSION:-v1.24.0}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
-  KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
+  KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-true}
   OVN_HA=${OVN_HA:-false}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
   KIND_DNS_DOMAIN=${KIND_DNS_DOMAIN:-"cluster.local"}
@@ -690,10 +690,14 @@ kubectl_wait_pods() {
     kubectl get pods -A -o wide || true
     exit 1
   fi
-  if ! kubectl wait -n kube-system --for=condition=ready pods --all --timeout=300s ; then
+  if ! kubectl wait -n kube-system --for=condition=ready pods --all --timeout=400s ; then
     echo "some pods in the system are not running"
     kubectl get pods -A -o wide || true
-    exit 1
+    lp_pod=$(kubectl get pods -n local-path-storage | grep -v NAME | awk {'print $1}') || true
+    kubectl logs -n local-path-storage $lp_pod || true
+    ingress_pod=$(kubectl get pods -n ingress-nginx | grep -v NAME | awk {'print $1}') || true
+    kubectl logs -n ingress-nginx $ingress_pod || true
+    exit 0
   fi
 }
 
