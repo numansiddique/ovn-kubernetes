@@ -10,9 +10,11 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -50,6 +52,17 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 
 	recorder := record.NewFakeRecorder(10)
 
+	nbZoneFailed := false
+	// Try to get the NBZone.  If there is an error, create NB_Global record.
+	// Otherwise NewController() will return error since it
+	// calls util.GetNBZone().
+	_, err = util.GetNBZone(nbClient)
+	if err != nil {
+		nbZoneFailed = true
+		nbGlobal := &nbdb.NBGlobal{Name: "global"}
+		_ = libovsdbops.CreateorUpdateNBGlobal(nbClient, nbGlobal)
+	}
+
 	controller, err := NewController(client,
 		nbClient,
 		informerFactory.Core().V1().Services(),
@@ -59,11 +72,18 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 	)
 	gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
+	if nbZoneFailed {
+		// Delete the NBGlobal row as this function created it.  Otherwise many tests would fail while
+		// checking the expectedData in the NBDB.
+		_ = libovsdbops.DeleteNBGlobal(nbClient, &nbdb.NBGlobal{Name: "global"})
+	}
+
 	controller.servicesSynced = alwaysReady
 	controller.endpointSlicesSynced = alwaysReady
 	controller.initTopLevelCache()
 	controller.useLBGroups = true
 	controller.useTemplates = true
+
 	return &serviceController{
 		controller,
 		informerFactory.Core().V1().Services().Informer().GetStore(),
@@ -470,7 +490,7 @@ func TestSyncServices(t *testing.T) {
 			controller.serviceStore.Add(tt.service)
 
 			controller.nodeTracker.nodes = defaultNodes
-			controller.RequestFullSync(controller.nodeTracker.allNodes())
+			controller.RequestFullSync(controller.nodeTracker.getZoneNodes())
 
 			err = controller.syncService(ns + "/" + serviceName)
 			if err != nil {
@@ -684,6 +704,7 @@ func nodeConfig(nodeName string, nodeIP string) *nodeInfo {
 		gatewayRouterName: nodeGWRouterName(nodeName),
 		switchName:        nodeSwitchName(nodeName),
 		chassisID:         nodeName,
+		zone:              types.OvnDefaultZone,
 	}
 }
 
