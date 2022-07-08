@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/pkg/errors"
 
 	v1 "k8s.io/api/core/v1"
@@ -664,6 +665,7 @@ func nodeConfig(nodeName string, nodeIP string) *nodeInfo {
 		nodeIPs:           []string{nodeIP},
 		gatewayRouterName: nodeGWRouterName(nodeName),
 		switchName:        nodeSwitchName(nodeName),
+		zone:              types.OvnDefaultZone,
 	}
 }
 
