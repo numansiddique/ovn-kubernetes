@@ -66,6 +66,10 @@ func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Con
 	if err != nil {
 		return fmt.Errorf("failed to get NB global Name: %v", err)
 	}
+	if config.Default.Zone != zone {
+		return fmt.Errorf("OVN Nortboubd db zone [%s] mismatch with the config zone [%s]", zone, config.Default.Zone)
+	}
+
 	oc.zone = zone
 
 	// Set up leader election process first

@@ -436,6 +436,9 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		nodeZone := getOVNSBZone()
+		if config.Default.Zone != nodeZone {
+			return fmt.Errorf("node %s zone [%s] mismatch with the Southbound zone [%s]", n.name, config.Default.Zone, nodeZone)
+		}
 		_ = util.SetNodeZone(nodeAnnotator, nodeZone)
 	}
 
