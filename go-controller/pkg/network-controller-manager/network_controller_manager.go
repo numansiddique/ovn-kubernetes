@@ -286,9 +286,19 @@ func (cm *networkControllerManager) initDefaultNetworkController() error {
 // Start the network controller manager
 func (cm *networkControllerManager) Start(ctx context.Context) error {
 	klog.Info("Starting the network controller manager")
+	// Get the zone name first.
+	zone, err := util.GetNBZone(cm.nbClient)
+
+	if err != nil {
+		return fmt.Errorf("error getting the zone name from the OVN Northbound db : %w", err)
+	}
+	if config.Default.Zone != zone {
+		return fmt.Errorf("failed to start default network controller - OVN Nortboubd db zone %s doesn't match with the configured zone %s", zone, config.Default.Zone)
+	}
+
 	cm.configureMetrics(cm.stopChan)
 
-	err := cm.configureSCTPSupport()
+	err = cm.configureSCTPSupport()
 	if err != nil {
 		return err
 	}
