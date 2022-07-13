@@ -433,6 +433,7 @@ type OvnKubeNodeConfig struct {
 	Mode                 string `gcfg:"mode"`
 	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
 	DisableOVNIfaceIdVer bool   `gcfg:"disable-ovn-iface-id-ver"`
+	Zone                 string `gcfg:"zone"`
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
@@ -1284,6 +1285,12 @@ var OvnKubeNodeFlags = []cli.Flag{
 			"(depends on ovn version, minimal required is 21.09)",
 		Value:       OvnKubeNode.DisableOVNIfaceIdVer,
 		Destination: &cliConfig.OvnKubeNode.DisableOVNIfaceIdVer,
+	},
+	&cli.StringFlag{
+		Name:        "ovnkube-node-zone",
+		Usage:       "ovnkube-node zone name",
+		Value:       OvnKubeNode.Zone,
+		Destination: &cliConfig.OvnKubeNode.Zone,
 	},
 }
 
@@ -2318,6 +2325,10 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 			return fmt.Errorf("ovnkube-node-mgmt-port-netdev is not supported with ovnkube-node mode %s",
 				OvnKubeNode.Mode)
 		}
+	}
+
+	if OvnKubeNode.Zone == "" {
+		OvnKubeNode.Zone = types.OvnDefaultZone
 	}
 	return nil
 }

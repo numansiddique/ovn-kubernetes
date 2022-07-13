@@ -1377,6 +1377,7 @@ ovn-node() {
     ${egress_interface} \
     --host-network-namespace ${ovn_host_network_namespace} \
     ${ovnkube_enable_interconnect_flag} \
+    --ovnkube-node-zone=${ovn_zone} \
      ${ovnkube_node_mgmt_port_netdev_flag} &
 
   wait_for_event attempts=3 process_ready ovnkube
