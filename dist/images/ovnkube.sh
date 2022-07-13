@@ -1009,6 +1009,8 @@ ovn-master() {
   fi
   echo "ovnkube_enable_interconnect_flag: ${ovnkube_enable_interconnect_flag}"
 
+  ovn_zone=$(get_node_zone)
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -1036,6 +1038,7 @@ ovn-master() {
     ${egressqos_enabled_flag} \
     ${ovnkube_config_duration_enable_flag} \
     ${ovnkube_enable_interconnect_flag} \
+    --zone ${ovn_zone} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
 
@@ -1349,6 +1352,8 @@ ovn-node() {
   fi
   echo "ovnkube_enable_interconnect_flag: ${ovnkube_enable_interconnect_flag}"
 
+  ovn_zone=$(get_node_zone)
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
@@ -1391,6 +1396,7 @@ ovn-node() {
     ${egress_interface} \
     --host-network-namespace ${ovn_host_network_namespace} \
     ${ovnkube_enable_interconnect_flag} \
+    --zone ${ovn_zone} \
      ${ovnkube_node_mgmt_port_netdev_flag} &
 
   wait_for_event attempts=3 process_ready ovnkube

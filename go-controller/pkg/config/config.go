@@ -68,6 +68,7 @@ var (
 		MonitorAll:            true,
 		LFlowCacheEnable:      true,
 		RawClusterSubnets:     "10.128.0.0/14/23",
+		Zone:                  types.OvnDefaultZone,
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -233,6 +234,8 @@ type DefaultConfig struct {
 	// of small UDP packets by allowing them to be aggregated before passing through
 	// the kernel network stack. This requires a new-enough kernel (5.15 or RHEL 8.5).
 	EnableUDPAggregation bool `gcfg:"enable-udp-aggregation"`
+
+	Zone string `gcfg:"zone"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -816,6 +819,12 @@ var CommonFlags = []cli.Flag{
 		Name:        "enable-interconnect",
 		Usage:       "Enables interconnecting multiple OVN zones.",
 		Destination: &EnableInterconnect,
+	},
+	&cli.StringFlag{
+		Name:        "zone",
+		Usage:       "ovnkube zone name",
+		Value:       Default.Zone,
+		Destination: &cliConfig.Default.Zone,
 	},
 }
 
@@ -1775,6 +1784,9 @@ func buildDefaultConfig(cli, file *config) error {
 		return fmt.Errorf("cluster subnet is required")
 	}
 
+	if Default.Zone == "" {
+		Default.Zone = types.OvnDefaultZone
+	}
 	return nil
 }
 
