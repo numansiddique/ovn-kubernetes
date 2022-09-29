@@ -53,6 +53,10 @@ spec:
                     operator: In
                     values:
                       - "linux"
+                  - key: k8s.ovn.org/ovn-zone-mode
+                    operator: NotIn
+                    values:
+                      - local
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             - labelSelector:

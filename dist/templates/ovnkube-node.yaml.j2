@@ -334,6 +334,10 @@ spec:
             - matchExpressions:
               - key: k8s.ovn.org/dpu-host
                 operator: DoesNotExist
+              - key: k8s.ovn.org/ovn-zone-mode
+                operator: NotIn
+                values:
+                - local
       {% endif -%}
       volumes:
       # Common volumes
