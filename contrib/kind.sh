@@ -339,6 +339,7 @@ print_params() {
      echo "OVN_EGRESSIP_HEALTHCHECK_PORT = $OVN_EGRESSIP_HEALTHCHECK_PORT"
      echo "KIND_NUM_ADDITIONAL_ZONES = $KIND_NUM_ADDITIONAL_ZONES"
      echo "OVN_INTERCONNECT_ENABLE = $OVN_INTERCONNECT_ENABLE"
+     echo "OVN_ENABLE_LOCAL_ZONE = $OVN_ENABLE_LOCAL_ZONE"
      echo ""
 }
 
@@ -449,6 +450,8 @@ set_default_params() {
   KIND_NUM_MASTER=1
   OVN_INTERCONNECT_ENABLE=${OVN_INTERCONNECT_ENABLE:-false}
   KIND_NUM_ZONE_NODES=${KIND_NUM_ZONE_NODES:-1}
+  OVN_ENABLE_LOCAL_ZONE=${OVN_ENABLE_LOCAL_ZONE:-false}
+
   if [ "$OVN_HA" == true ]; then
     KIND_NUM_MASTER=3
     NUM_WORKER=${KIND_NUM_WORKER:-0}
@@ -461,9 +464,15 @@ set_default_params() {
 
   if [ "$OVN_INTERCONNECT_ENABLE" == false ]; then
     KIND_NUM_ADDITIONAL_ZONES="0"
+    OVN_ENABLE_LOCAL_ZONE="false"
   else
     KIND_NUM_ADDITIONAL_ZONES=${KIND_NUM_ADDITIONAL_ZONES:-2}
     NUM_WORKER=${KIND_NUM_WORKER:-0}
+
+    if [ "$OVN_ENABLE_LOCAL_ZONE" == true ]; then
+      # Each node is a zone. So there can only be one node per zone.
+      KIND_NUM_ZONE_NODES=1
+    fi
   fi
 
   KIND_NUM_WORKER=$NUM_WORKER
@@ -733,30 +742,37 @@ install_ovn() {
     worker_idx=$((worker_idx+1))
   done
 
-  for i in $(seq $KIND_NUM_ADDITIONAL_ZONES)
-  do
-    az_name="az$i"
-    for j in $(seq ${KIND_NUM_ZONE_NODES})
+  if [ "$OVN_ENABLE_LOCAL_ZONE" == false ]; then
+    for i in $(seq $KIND_NUM_ADDITIONAL_ZONES)
     do
-      if [ "$worker_idx" == "1" ]; then
-        worker=ovn-worker
-      else
-        worker=ovn-worker${worker_idx}
-      fi
-      kubectl label node "$worker" k8s.ovn.org/ovn-zone=${az_name} --overwrite
-      if [ "$j" == "1" ]; then
-        kubectl label node "$worker" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/control-plane="" k8s.ovn.org/ovnkube-master="" --overwrite
-        if [ "$KIND_REMOVE_TAINT" == true ]; then
-          # do not error if it fails to remove the taint
-          # remove both master and control-plane taints until master is removed from 1.25
-          # // https://github.com/kubernetes/kubernetes/pull/107533
-          kubectl taint node "$worker" node-role.kubernetes.io/master:NoSchedule- || true
-          kubectl taint node "$worker" node-role.kubernetes.io/control-plane:NoSchedule- || true
+      az_name="az$i"
+      for j in $(seq ${KIND_NUM_ZONE_NODES})
+      do
+        if [ "$worker_idx" == "1" ]; then
+          worker=ovn-worker
+        else
+          worker=ovn-worker${worker_idx}
         fi
-      fi
-      worker_idx=$((worker_idx+1))
+        kubectl label node "$worker" k8s.ovn.org/ovn-zone=${az_name} --overwrite
+        if [ "$j" == "1" ]; then
+          kubectl label node "$worker" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/control-plane="" k8s.ovn.org/ovnkube-master="" --overwrite
+          if [ "$KIND_REMOVE_TAINT" == true ]; then
+            # do not error if it fails to remove the taint
+            # remove both master and control-plane taints until master is removed from 1.25
+            # // https://github.com/kubernetes/kubernetes/pull/107533
+            kubectl taint node "$worker" node-role.kubernetes.io/master:NoSchedule- || true
+            kubectl taint node "$worker" node-role.kubernetes.io/control-plane:NoSchedule- || true
+          fi
+        fi
+        worker_idx=$((worker_idx+1))
+      done
     done
-  done
+  else
+    KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+    for n in $KIND_NODES; do
+      kubectl label node "${n}" k8s.ovn.org/ovn-zone=${n} k8s.ovn.org/ovn-zone-mode=local --overwrite
+    done
+  fi
 
   if [ "$OVN_HA" == true ]; then
     run_kubectl apply -f ovnkube-db-raft.yaml
@@ -764,14 +780,20 @@ install_ovn() {
     if [ "$OVN_INTERCONNECT_ENABLE" == false ]; then
       run_kubectl apply -f ovnkube-db.yaml
     else
-      run_kubectl apply -f ovnkube-db-zone.yaml
+      if [ "$OVN_ENABLE_LOCAL_ZONE" == true ]; then
+        run_kubectl apply -f ovnkube-local.yaml
+      else
+        run_kubectl apply -f ovnkube-db-zone.yaml
+      fi
     fi
   fi
   run_kubectl apply -f ovs-node.yaml
   if [ "$OVN_INTERCONNECT_ENABLE" == false ]; then
     run_kubectl apply -f ovnkube-master.yaml
   else
-    run_kubectl apply -f ovnkube-master-zone.yaml
+    if [ "$OVN_ENABLE_LOCAL_ZONE" == false ]; then
+      run_kubectl apply -f ovnkube-master-zone.yaml
+    fi
   fi
 
   run_kubectl apply -f ovnkube-node.yaml
