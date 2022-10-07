@@ -570,10 +570,7 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 		}
 	} else {
 		// Track remote ovn networked pods too, for network policy, and egress gw.
-		if len(pod.Status.PodIPs) < 1 {
-			return fmt.Errorf("failed to get remote zone pod %s/%s IPs",
-				pod.Namespace, pod.Name)
-		} else {
+		if len(pod.Status.PodIPs) >= 1 {
 			var ips []*net.IPNet
 			for _, podIp := range pod.Status.PodIPs {
 				ip := net.ParseIP(podIp.IP)
@@ -604,7 +601,6 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 				}
 			}
 		}
-		return nil
 	}
 
 	return nil
