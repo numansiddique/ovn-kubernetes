@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
+
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
-	"time"
 
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
@@ -38,7 +39,7 @@ func TransactAndCheck(c client.Client, ops []ovsdb.Operation) ([]ovsdb.Operation
 		return []ovsdb.OperationResult{{}}, nil
 	}
 
-	klog.Infof("Configuring OVN: %+v", ops)
+	//klog.Infof("Configuring OVN: %+v", ops)
 
 	ctx, cancel := context.WithTimeout(context.TODO(), types.OVSDBTimeout)
 	defer cancel()
