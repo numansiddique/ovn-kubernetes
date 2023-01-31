@@ -422,15 +422,9 @@ func (oc *SecondaryLayer3NetworkController) addUpdateNodeEvent(node *kapi.Node, 
 
 func (oc *SecondaryLayer3NetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.GetNetworkName())
-	if err != nil && !util.IsAnnotationNotSetError(err) {
+	if err != nil && !util.IsAnnotationNotSetError(err) || len(hostSubnets) < 1 {
 		// Log the error and try to allocate new subnets
 		klog.Infof("Failed to get node %s host subnets annotations: %v", node.Name, err)
-		return nil, err
-	}
-
-	hostSubnetsMap := map[string][]*net.IPNet{oc.GetNetworkName(): hostSubnets}
-	err = oc.UpdateNodeAnnotationWithRetry(node.Name, hostSubnetsMap, nil)
-	if err != nil {
 		return nil, err
 	}
 

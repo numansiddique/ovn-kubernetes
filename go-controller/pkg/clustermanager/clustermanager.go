@@ -2,11 +2,13 @@ package clustermanager
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"reflect"
 	"sync"
 	"time"
 
+	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
@@ -14,9 +16,11 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	nad "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-attach-def-controller"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	clientset "k8s.io/client-go/kubernetes"
 )
 
 // ClusterManager structure is the object which manages the cluster nodes.
@@ -25,6 +29,7 @@ type ClusterManager struct {
 	defaultNetClusterMgr *defaultNetworkClusterMgr
 	wf                   *factory.WatchFactory
 	stopChan             chan struct{}
+	multiNetAttachMgr    *multiNetworkAttachMgr
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 }
@@ -41,6 +46,9 @@ func NewClusterManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory, s
 		stopChan:             stopChan,
 	}
 
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		cm.multiNetAttachMgr = newMultiNetAttachMgr(ovnClient, wf, recorder)
+	}
 	return cm
 }
 
@@ -142,6 +150,10 @@ func (cm *ClusterManager) Stop() {
 	metrics.UnRegisterClusterManagerFunctional()
 	close(cm.stopChan)
 	cm.defaultNetClusterMgr.Stop()
+
+	if cm.multiNetAttachMgr != nil {
+		cm.multiNetAttachMgr.Stop()
+	}
 }
 
 // StartClusterManager runs a subnet IPAM that watches arrival/departure
@@ -168,7 +180,16 @@ func (cm *ClusterManager) Run() error {
 		return err
 	}
 
-	return cm.defaultNetClusterMgr.Run()
+	if err := cm.defaultNetClusterMgr.Run(); err != nil {
+		return err
+	}
+
+	if cm.multiNetAttachMgr != nil {
+		klog.Infof("Starting multi network attach manager")
+		return cm.multiNetAttachMgr.Run(cm.stopChan)
+	}
+
+	return nil
 }
 
 // hasResourceAnUpdateFunc returns true if the given resource type has a dedicated update function.
@@ -180,4 +201,76 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 		return true
 	}
 	return false
+}
+
+// multiNetworkAttachMgr object manages the multi net-attach-def controllers
+type multiNetworkAttachMgr struct {
+	// net-attach-def controller handle net-attach-def and create/delete network controllers
+	nadController *nad.NetAttachDefinitionController
+	client        clientset.Interface
+	ovnClient     *util.OVNClientset
+	kube          kube.Interface
+	watchFactory  *factory.WatchFactory
+}
+
+func newMultiNetAttachMgr(ovnClient *util.OVNClientset,
+	wf *factory.WatchFactory, recorder record.EventRecorder) *multiNetworkAttachMgr {
+	klog.Infof("Creates new Multi Network cluster manager")
+	kube := &kube.Kube{
+		KClient:              ovnClient.KubeClient,
+		EIPClient:            ovnClient.EgressIPClient,
+		EgressFirewallClient: ovnClient.EgressFirewallClient,
+		CloudNetworkClient:   ovnClient.CloudNetworkClient,
+	}
+	mnm := &multiNetworkAttachMgr{
+		ovnClient:    ovnClient,
+		client:       ovnClient.KubeClient,
+		kube:         kube,
+		watchFactory: wf,
+	}
+	mnm.nadController = nad.NewNetAttachDefinitionController(
+		mnm, ovnClient, recorder)
+	return mnm
+}
+
+func (mnm *multiNetworkAttachMgr) Run(stopChan <-chan struct{}) error {
+	klog.Infof("Starting net-attach-def controller")
+	return mnm.nadController.Run(stopChan)
+}
+
+// Start starts the secondary layer3 controller, handles all events and creates all needed logical entities
+func (mm *multiNetworkAttachMgr) Start() error {
+	klog.Infof("Start secondary network controller of network")
+	return nil
+}
+
+func (mm *multiNetworkAttachMgr) Stop() {
+	// stops each network controller associated with net-attach-def; it is ok
+	// to call GetAllControllers here as net-attach-def controller has been stopped,
+	// and no more change of network controllers
+	klog.Infof("Stops net-attach-def controller")
+	for _, oc := range mm.nadController.GetAllNetworkControllers() {
+		oc.Stop()
+	}
+}
+
+func (mm *multiNetworkAttachMgr) NewNetworkController(nInfo util.NetInfo,
+	netConfInfo util.NetConfInfo) (nad.NetworkController, error) {
+	klog.Infof("New net-attach-def controller for network %s called", nInfo.GetNetworkName())
+	topoType := netConfInfo.TopologyType()
+	if topoType == ovntypes.Layer3Topology {
+		stopChan := make(chan struct{})
+		sncm := newSecondaryLayer3NetworkClusterMgr(mm.ovnClient, mm.watchFactory,
+			stopChan, &sync.WaitGroup{}, nInfo, netConfInfo, nInfo.GetNetworkName())
+
+		sncm.initRetryFramework()
+		return sncm, nil
+	}
+	return nil, fmt.Errorf("topology type %s not supported", topoType)
+
+}
+
+func (mm *multiNetworkAttachMgr) CleanupDeletedNetworks(allControllers []nad.NetworkController) error {
+	// Nothing need to be done here
+	return nil
 }
