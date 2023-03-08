@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -117,6 +118,9 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 		return nil, err
 	}
 
+	// For kubevirt live migratable interface the ip config is done with dhcp
+	skipIPConfig := netName == types.DefaultNetworkName && kubevirt.AllowPodBridgeNetworkLiveMigration(podAnnotation)
+
 	podInterfaceInfo := &PodInterfaceInfo{
 		PodAnnotation:        *podNADAnnotation,
 		MTU:                  mtu,
@@ -124,6 +128,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 		Ingress:              ingress,
 		Egress:               egress,
 		IsDPUHostMode:        config.OvnKubeNode.Mode == types.NodeModeDPUHost,
+		SkipIPConfig:         skipIPConfig,
 		PodUID:               podUID,
 		NetdevName:           netdevname,
 		NetName:              netName,
