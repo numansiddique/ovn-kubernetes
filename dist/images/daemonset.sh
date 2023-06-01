@@ -663,7 +663,7 @@ ovn_image=${image} \
   enable_ipsec=${enable_ipsec} \
   j2 ../templates/ovnkube-db-raft.yaml.j2 -o ${output_dir}/ovnkube-db-raft.yaml
 
-ovn_image=${image} \
+ovn_image=${ovnkube_image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_gateway_mode=${ovn_gateway_mode} \
@@ -714,7 +714,7 @@ ovn_image=${image} \
   ovn_enable_interconnect=${ovn_enable_interconnect} \
   j2 ../templates/ovnkube-single-node-zone.yaml.j2 -o ../yaml/ovnkube-single-node-zone.yaml
 
-ovn_image=${image} \
+ovn_image=${ovnkube_image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_gateway_mode=${ovn_gateway_mode} \

@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -22,20 +23,16 @@ func (oc *DefaultNetworkController) ensureDHCPOptionsForVM(pod *corev1.Pod, lsp 
 		return nil
 	}
 
-	switchNames, err := oc.getSwitchNames(pod)
+	ovnPodAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
 	if err != nil {
-		return fmt.Errorf("failed configuring dhcp when getting switch current and original name: %v", err)
-	}
-	var switchSubnets []*net.IPNet
-	if switchSubnets = oc.lsManager.GetSwitchSubnets(switchNames.Original); switchSubnets == nil {
-		return fmt.Errorf("subnet not found for switch %s to configuare DHCP at lsp %s", switchNames.Original, lsp.Name)
+		return fmt.Errorf("failed retrieving subnets to configure DHCP at lsp %s: %v", lsp.Name, err)
 	}
 	// Fake router to delegate on proxy arp mechanism
 	vmName, ok := pod.Labels[kvv1.VirtualMachineNameLabel]
 	if !ok {
 		return fmt.Errorf("missing %s label at pod %s/%s when configuaring DHCP", kvv1.VirtualMachineNameLabel, pod.Namespace, pod.Name)
 	}
-	dhcpConfig, err := kubevirt.ComposeDHCPConfig(oc.watchFactory, vmName, switchSubnets)
+	dhcpConfig, err := kubevirt.ComposeDHCPConfig(oc.watchFactory, vmName, ovnPodAnnotation.IPs)
 	if err != nil {
 		return fmt.Errorf("failed composing DHCP options: %v", err)
 	}
