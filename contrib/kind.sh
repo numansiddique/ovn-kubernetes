@@ -279,6 +279,7 @@ parse_args() {
                                                 ;;
             -ovb | --ovn-branch )               shift
                                                 OVN_BRANCH=$1
+                                                ;;
             -ml  | --master-loglevel )          shift
                                                 if ! [[ "$1" =~ ^[0-9]$ ]]; then
                                                     echo "Invalid master-loglevel: $1"
