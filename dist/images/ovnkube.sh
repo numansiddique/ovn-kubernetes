@@ -1125,6 +1125,12 @@ ovn-master() {
   fi
   echo "ovn_stateless_netpol_enable_flag: ${ovn_stateless_netpol_enable_flag}"
 
+  ovnkube_enable_interconnect_flag=
+  if [[ ${ovn_enable_interconnect} == "true" ]]; then
+    ovnkube_enable_interconnect_flag="--enable-interconnect"
+  fi
+  echo "ovnkube_enable_interconnect_flag: ${ovnkube_enable_interconnect_flag}"
+
   init_node_flags=
   if [[ ${ovnkube_compact_mode_enable} == "true" ]]; then
     init_node_flags="--init-node ${K8S_NODE} --nodeport"
@@ -1165,6 +1171,7 @@ ovn-master() {
     ${ovnkube_metrics_scale_enable_flag} \
     ${multi_network_enabled_flag} \
     ${ovn_stateless_netpol_enable_flag} \
+    ${ovnkube_enable_interconnect_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
 
