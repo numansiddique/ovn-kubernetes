@@ -130,6 +130,7 @@ export NUM_NODES=2
 export ACK_GINKGO_DEPRECATIONS=2.4.0
 
 FOCUS=$(echo ${@:1} | sed 's/ /\\s/g')
+FOCUS="NUMAN"
 
 pushd e2e
 

@@ -3,10 +3,11 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"golang.org/x/sync/errgroup"
 	"math/rand"
 	"regexp"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
@@ -245,7 +246,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 	})
 })
 
-var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
+var _ = ginkgo.Describe("NUMAN Pod to pod TCP with low MTU", func() {
 	const (
 		echoServerPodNameTemplate = "echo-server-pod-%d"
 		echoClientPodName         = "echo-client-pod"
@@ -261,7 +262,7 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 		cleanupFn()
 	})
 
-	ginkgo.When("a client ovnk pod targeting an ovnk pod server(running on another node)", func() {
+	ginkgo.When("NUMAN a client ovnk pod targeting an ovnk pod server(running on another node)", func() {
 		var serverPod *v1.Pod
 		var serverPodNodeName string
 		var serverPodName string
@@ -340,7 +341,7 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 
 		// Lower the MTU between the two nodes to 1400, this will cause pod->pod 1400 byte packets
 		// to be too big for geneve encapsulation
-		ginkgo.When("MTU is lowered between the two nodes", func() {
+		ginkgo.When("NUMAN MTU is lowered between the two nodes", func() {
 			ginkgo.It("large queries to the server pod on another node shall work for TCP", func() {
 				for _, serverPodIP := range serverPod.Status.PodIPs {
 					framework.Logf("Server pod running on node: %s, with IP: %s", serverPodNodeName, serverPodIP.IP)
@@ -349,6 +350,7 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 					datapathDumpSync := errgroup.Group{}
 
 					runDatapathDump := func(pod string, node string) error {
+						return nil
 						ticker := time.NewTicker(1 * time.Second)
 						defer ticker.Stop()
 						maxTicks := 15
@@ -407,6 +409,7 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 						30*time.Second)
 					_ = tcpDumpSync.Wait()
 					_ = datapathDumpSync.Wait()
+
 					for _, nodeName := range []string{serverPodNodeName, clientPodNodeName} {
 						nodeName := nodeName
 						framework.Logf("Node name is: %s", nodeName)
@@ -414,7 +417,7 @@ var _ = ginkgo.Describe("Pod to pod TCP with low MTU", func() {
 						ovnkPod, err := getOVNKubePod(f.ClientSet, nodeName)
 						framework.ExpectNoError(err, "Could not get OVNK pod to setup OF dump")
 						stdout, err := e2ekubectl.RunKubectl(ovnNamespace, "exec", ovnkPod.Name, "--", "ovs-ofctl",
-							"dump-flows", "br-int")
+							"dump-flows", "br-int", "table=8")
 						if err != nil {
 							framework.ExpectNoError(err, "Could not dump OF flows")
 						}
